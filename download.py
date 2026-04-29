@@ -1,12 +1,12 @@
 """Download new clips from a specific Arlo camera to the local clips directory."""
 
+import argparse
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pyaarlo
-import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -27,10 +27,26 @@ CAMERA_NAME = os.environ["ARLO_CAMERA_NAME"]
 DAYS_BACK = int(os.getenv("DAYS_BACK", "1"))
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--latest",
+        type=int,
+        metavar="N",
+        help="Only download the most recent N videos within the selected library window.",
+    )
+    args = parser.parse_args()
+    if args.latest is not None and args.latest < 1:
+        parser.error("--latest must be a positive integer")
+    return args
+
+
 def connect_arlo() -> pyaarlo.PyArlo:
     return pyaarlo.PyArlo(
         username=os.environ["ARLO_USERNAME"],
         password=os.environ["ARLO_PASSWORD"],
+        library_days=max(DAYS_BACK, 1),
+        synchronous_mode=True,
         tfa_source=os.getenv("ARLO_TFA_SOURCE", "console"),
         tfa_type=os.getenv("ARLO_TFA_TYPE", "email"),
         storage_dir=str(SESSION_DIR),
@@ -42,17 +58,16 @@ def clip_filename(created_at_ms: int) -> str:
     return dt.strftime("%Y%m%d_%H%M%S_UTC") + ".mp4"
 
 
-def download_clip(url: str, dest: Path) -> None:
-    response = requests.get(url, stream=True, timeout=120)
-    response.raise_for_status()
+def download_clip(recording, dest: Path) -> None:
     tmp = dest.with_suffix(".tmp")
-    with open(tmp, "wb") as f:
-        for chunk in response.iter_content(chunk_size=65536):
-            f.write(chunk)
+    ok = recording.download_video(str(tmp))
+    if not ok:
+        raise RuntimeError("pyaarlo download_video() returned False")
     tmp.rename(dest)
 
 
 def main() -> None:
+    args = parse_args()
     CLIPS_DIR.mkdir(exist_ok=True)
     SESSION_DIR.mkdir(exist_ok=True)
 
@@ -68,9 +83,19 @@ def main() -> None:
     log.info('Found camera "%s" (device_id=%s)', CAMERA_NAME, camera.device_id)
 
     log.info("Fetching library (last %d day(s))...", DAYS_BACK)
+    camera.update_media(wait=True)
+    _, recordings = ar.ml.videos_for(camera)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=DAYS_BACK)
     recordings = [
-        r for r in ar.library(days=DAYS_BACK) if r.device_id == camera.device_id
+        r
+        for r in recordings
+        if r.created_at is not None
+        and datetime.fromtimestamp(r.created_at / 1000, tz=timezone.utc) >= cutoff
     ]
+    recordings.sort(key=lambda r: r.created_at, reverse=True)
+    if args.latest is not None:
+        recordings = recordings[: args.latest]
+        log.info("Limiting download set to the most recent %d recording(s).", args.latest)
     log.info(
         'Found %d recording(s) for camera "%s"', len(recordings), CAMERA_NAME
     )
@@ -84,7 +109,7 @@ def main() -> None:
             continue
         log.info("Downloading %s...", filename)
         try:
-            download_clip(rec.video_url, dest)
+            download_clip(rec, dest)
             downloaded += 1
         except Exception as e:
             log.error("Failed to download %s: %s", filename, e)

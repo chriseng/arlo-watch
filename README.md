@@ -91,6 +91,12 @@ source .venv/bin/activate
 python3 download.py
 ```
 
+To restrict a run to the newest clips in the current `DAYS_BACK` window:
+
+```bash
+python3 download.py --latest 5
+```
+
 When prompted, enter the 2FA code sent to your email. pyaarlo saves the session token to `.arlo_session/` so subsequent runs won't need it. Session tokens typically last several weeks.
 
 If the session expires and you're running unattended via cron, see **Unattended 2FA** below.
@@ -151,6 +157,8 @@ All settings go in `.env`. Optional overrides:
 | `SESSION_DIR` | `.arlo_session` | pyaarlo session token storage |
 | `DAYS_BACK` | `1` | How many days of library to fetch per run |
 | `GEMINI_MODEL` | `gemini-2.0-flash` | Gemini model to use for analysis |
+
+`download.py` accepts `--latest N` to restrict a run to the most recent `N` videos found within the configured `DAYS_BACK` window.
 
 ---
 
