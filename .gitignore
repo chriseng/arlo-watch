@@ -1,0 +1,7 @@
+.env
+.arlo_session/
+clips/
+arlo_watch.log
+__pycache__/
+*.pyc
+.venv/

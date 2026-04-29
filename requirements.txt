@@ -1,0 +1,4 @@
+pyaarlo
+requests
+python-dotenv
+google-generativeai
