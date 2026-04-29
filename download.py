@@ -5,6 +5,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pyaarlo
 from dotenv import load_dotenv
@@ -25,6 +26,7 @@ CLIPS_DIR = Path(os.getenv("CLIPS_DIR", "clips"))
 SESSION_DIR = Path(os.getenv("SESSION_DIR", ".arlo_session"))
 CAMERA_NAME = os.environ["ARLO_CAMERA_NAME"]
 DAYS_BACK = int(os.getenv("DAYS_BACK", "1"))
+EASTERN_TZ = ZoneInfo("America/New_York")
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,8 +56,10 @@ def connect_arlo() -> pyaarlo.PyArlo:
 
 
 def clip_filename(created_at_ms: int) -> str:
-    dt = datetime.fromtimestamp(created_at_ms / 1000, tz=timezone.utc)
-    return dt.strftime("%Y%m%d_%H%M%S_UTC") + ".mp4"
+    dt = datetime.fromtimestamp(created_at_ms / 1000, tz=timezone.utc).astimezone(
+        EASTERN_TZ
+    )
+    return dt.strftime("%Y%m%d_%H%M%S_%Z") + ".mp4"
 
 
 def download_clip(recording, dest: Path) -> None:

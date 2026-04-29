@@ -3,10 +3,14 @@
 import json
 import logging
 import os
+import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,14 +26,15 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 CLIPS_DIR = Path(os.getenv("CLIPS_DIR", "clips"))
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
+EASTERN_TZ = ZoneInfo("America/New_York")
 
 PROMPT = """Analyze this security camera clip and return ONLY a valid JSON object with these fields:
 - duration_seconds (integer: estimated clip length)
 - persons (integer: number of distinct people visible)
 - vehicles (integer: number of distinct vehicles visible)
 - animals (integer: number of distinct animals visible)
-- activity (string: one sentence describing what happens in the clip)
+- activity (string: one sentence describing what happens in the clip, up to a paragraph if necessary. identify species of birds when able)
 - notable_events (array of strings: specific actions, e.g. "person approached door")
 - motion_area (string: where primary motion occurs, e.g. "left", "center", "right", "full frame")
 - time_of_day (string: one of "day", "dusk", "night", "dawn")
@@ -41,9 +46,9 @@ POLL_INTERVAL_SECONDS = 5
 UPLOAD_TIMEOUT_SECONDS = 300
 
 
-def upload_and_wait(path: Path) -> genai.types.File:
+def upload_and_wait(client: genai.Client, path: Path):
     log.info("Uploading %s to Gemini Files API...", path.name)
-    video_file = genai.upload_file(path=str(path), mime_type="video/mp4")
+    video_file = client.files.upload(file=str(path))
 
     elapsed = 0
     while video_file.state.name == "PROCESSING":
@@ -53,7 +58,7 @@ def upload_and_wait(path: Path) -> genai.types.File:
             )
         time.sleep(POLL_INTERVAL_SECONDS)
         elapsed += POLL_INTERVAL_SECONDS
-        video_file = genai.get_file(video_file.name)
+        video_file = client.files.get(name=video_file.name)
 
     if video_file.state.name != "ACTIVE":
         raise RuntimeError(
@@ -62,43 +67,104 @@ def upload_and_wait(path: Path) -> genai.types.File:
     return video_file
 
 
-def analyze_clip(path: Path) -> dict:
-    video_file = upload_and_wait(path)
+def analyze_clip(client: genai.Client, path: Path) -> dict:
+    video_file = upload_and_wait(client, path)
     try:
-        model = genai.GenerativeModel(GEMINI_MODEL)
-        response = model.generate_content([video_file, PROMPT])
-        raw = response.text.strip()
-        return json.loads(raw)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[video_file, PROMPT],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0,
+            ),
+        )
+        return parse_json_response(response, path.name)
     finally:
         try:
-            genai.delete_file(video_file.name)
+            client.files.delete(name=video_file.name)
         except Exception as e:
             log.warning("Could not delete Gemini file %s: %s", video_file.name, e)
 
 
-def main() -> None:
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+def parse_json_response(response, clip_name: str) -> dict:
+    candidates = []
 
-    clips = sorted(CLIPS_DIR.glob("*.mp4"))
-    pending = [c for c in clips if not c.with_suffix(".json").exists()]
-    log.info("%d clip(s) pending analysis.", len(pending))
+    text = getattr(response, "text", None)
+    if text:
+        candidates.append(text)
 
-    succeeded = 0
-    failed = 0
-    for clip in pending:
-        out = clip.with_suffix(".json")
-        log.info("Analyzing %s...", clip.name)
+    for candidate in getattr(response, "candidates", []) or []:
+        content = getattr(candidate, "content", None)
+        parts = getattr(content, "parts", None) or []
+        for part in parts:
+            part_text = getattr(part, "text", None)
+            if part_text:
+                candidates.append(part_text)
+
+    for raw in candidates:
+        cleaned = raw.strip()
+        if not cleaned:
+            continue
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
         try:
-            result = analyze_clip(clip)
-            result["clip_file"] = clip.name
-            out.write_text(json.dumps(result, indent=2))
-            log.info("Saved %s", out.name)
-            succeeded += 1
-        except Exception as e:
-            log.error("Failed to analyze %s: %s", clip.name, e)
-            failed += 1
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
 
-    log.info("Analysis complete: %d succeeded, %d failed.", succeeded, failed)
+    finish_reasons = [
+        str(getattr(candidate, "finish_reason", "unknown"))
+        for candidate in getattr(response, "candidates", []) or []
+    ]
+    preview = " | ".join(candidate.strip().replace("\n", " ")[:200] for candidate in candidates if candidate.strip())
+    raise RuntimeError(
+        f"Gemini returned no parseable JSON for {clip_name}; "
+        f"finish_reasons={finish_reasons or ['none']}; preview={preview or '<empty>'}"
+    )
+
+
+def clip_timestamp_est(path: Path) -> str:
+    stem = path.stem
+    if stem.endswith("_UTC"):
+        utc_dt = datetime.strptime(stem, "%Y%m%d_%H%M%S_UTC").replace(
+            tzinfo=timezone.utc
+        )
+        return utc_dt.astimezone(EASTERN_TZ).isoformat()
+    if stem.endswith("_EST") or stem.endswith("_EDT"):
+        local_dt = datetime.strptime(stem[:-4], "%Y%m%d_%H%M%S").replace(
+            tzinfo=EASTERN_TZ
+        )
+        return local_dt.isoformat()
+    raise ValueError(
+        f"Unsupported clip filename format for timestamp extraction: {path.name}"
+    )
+
+
+def main() -> None:
+    with genai.Client(api_key=os.environ["GEMINI_API_KEY"]) as client:
+        clips = sorted(CLIPS_DIR.glob("*.mp4"))
+        pending = [c for c in clips if not c.with_suffix(".json").exists()]
+        log.info("%d clip(s) pending analysis.", len(pending))
+
+        succeeded = 0
+        failed = 0
+        for clip in pending:
+            out = clip.with_suffix(".json")
+            log.info("Analyzing %s...", clip.name)
+            try:
+                result = analyze_clip(client, clip)
+                result["clip_file"] = clip.name
+                result["timestamp_est"] = clip_timestamp_est(clip)
+                out.write_text(json.dumps(result, indent=2))
+                log.info("Saved %s", out.name)
+                succeeded += 1
+            except Exception as e:
+                log.error("Failed to analyze %s: %s", clip.name, e)
+                failed += 1
+
+        log.info("Analysis complete: %d succeeded, %d failed.", succeeded, failed)
 
 
 if __name__ == "__main__":
