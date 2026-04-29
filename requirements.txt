@@ -1,4 +1,4 @@
 pyaarlo
 requests
 python-dotenv
-google-generativeai
+google-genai

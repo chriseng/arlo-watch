@@ -156,7 +156,7 @@ All settings go in `.env`. Optional overrides:
 | `CLIPS_DIR` | `clips` | Directory where clips are saved |
 | `SESSION_DIR` | `.arlo_session` | pyaarlo session token storage |
 | `DAYS_BACK` | `1` | How many days of library to fetch per run |
-| `GEMINI_MODEL` | `gemini-2.0-flash` | Gemini model to use for analysis |
+| `GEMINI_MODEL` | `gemini-3.1-flash-lite-preview` | Gemini model to use for analysis |
 
 `download.py` accepts `--latest N` to restrict a run to the most recent `N` videos found within the configured `DAYS_BACK` window.
 
