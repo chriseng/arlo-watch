@@ -29,7 +29,7 @@ recordings = [
 ]
 
 print(f"Found {len(recordings)} recording(s)\n")
-for rec in recordings[:5]:
+for rec in recordings:
     print(f"  created_at : {rec.created_at}")
     print(f"  duration   : {getattr(rec, 'duration', 'ATTR_MISSING')}")
     # dump raw data so we can see every available field

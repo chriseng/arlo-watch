@@ -3,6 +3,7 @@
 import argparse
 import logging
 import os
+import struct
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -63,6 +64,43 @@ def clip_filename(created_at_ms: int) -> str:
     return dt.strftime("%Y%m%d_%H%M%S_%Z") + ".mp4"
 
 
+def get_mp4_duration(mp4: Path) -> float | None:
+    """Parse duration from MP4 mvhd box. Returns None if unreadable."""
+    try:
+        data = mp4.read_bytes()
+    except OSError:
+        return None
+
+    pos = 0
+    while pos < len(data) - 8:
+        box_size = struct.unpack_from(">I", data, pos)[0]
+        box_type = data[pos + 4 : pos + 8]
+
+        if box_size < 8:
+            break
+
+        if box_type == b"moov":
+            pos += 8
+            continue
+
+        if box_type == b"mvhd":
+            mvhd = data[pos + 8 :]
+            version = mvhd[0]
+            if version == 1:
+                timescale = struct.unpack_from(">I", mvhd, 20)[0]
+                duration = struct.unpack_from(">Q", mvhd, 24)[0]
+            else:
+                timescale = struct.unpack_from(">I", mvhd, 12)[0]
+                duration = struct.unpack_from(">I", mvhd, 16)[0]
+            if timescale == 0:
+                return None
+            return duration / timescale
+
+        pos += box_size
+
+    return None
+
+
 def download_clip(recording, dest: Path) -> None:
     tmp = dest.with_suffix(".tmp")
     ok = recording.download_video(str(tmp))
@@ -112,16 +150,29 @@ def main() -> None:
         if dest.exists():
             log.debug("Already have %s, skipping.", filename)
             continue
-        clip_secs = getattr(rec, "mediaDurationSecond", None)
+
+        # Pre-filter using metadata when available (saves a download)
+        attrs = getattr(rec, "_attrs", {})
+        clip_secs = attrs.get("mediaDurationSecond") if isinstance(attrs, dict) else None
         if clip_secs is not None and clip_secs < MIN_CLIP_DURATION_SECONDS:
-            log.info("Skipping %s (%ds < %ds minimum)", filename, clip_secs, MIN_CLIP_DURATION_SECONDS)
+            log.info("Skipping %s (%ds < %ds minimum, from metadata)", filename, clip_secs, MIN_CLIP_DURATION_SECONDS)
             continue
+
         log.info("Downloading %s...", filename)
         try:
             download_clip(rec, dest)
-            downloaded += 1
         except Exception as e:
             log.error("Failed to download %s: %s", filename, e)
+            continue
+
+        # Verify actual duration from the file (metadata is often missing/wrong)
+        duration = get_mp4_duration(dest)
+        if duration is not None and duration < MIN_CLIP_DURATION_SECONDS:
+            log.info("Deleting %s (%.1fs < %ds minimum)", filename, duration, MIN_CLIP_DURATION_SECONDS)
+            dest.unlink()
+            continue
+
+        downloaded += 1
 
     log.info("Downloaded %d new clip(s).", downloaded)
 
