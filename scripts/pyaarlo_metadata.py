@@ -1,17 +1,14 @@
 import os
-from dotenv import load_dotenv
-import pyaarlo
 from datetime import datetime, timedelta, timezone
+
+from dotenv import load_dotenv
+
+from arlo_client import connect_arlo
 
 load_dotenv()
 
-ar = pyaarlo.PyArlo(
-    username=os.environ["ARLO_USERNAME"],
-    password=os.environ["ARLO_PASSWORD"],
+ar = connect_arlo(
     library_days=1,
-    synchronous_mode=True,
-    tfa_source=os.getenv("ARLO_TFA_SOURCE", "console"),
-    tfa_type=os.getenv("ARLO_TFA_TYPE", "email"),
     storage_dir=os.getenv("SESSION_DIR", ".arlo_session"),
 )
 

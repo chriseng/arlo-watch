@@ -8,8 +8,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import pyaarlo
 from dotenv import load_dotenv
+
+from scripts.arlo_client import connect_arlo
 
 load_dotenv()
 
@@ -43,20 +44,6 @@ def parse_args() -> argparse.Namespace:
     if args.latest is not None and args.latest < 1:
         parser.error("--latest must be a positive integer")
     return args
-
-
-def connect_arlo() -> pyaarlo.PyArlo:
-    return pyaarlo.PyArlo(
-        username=os.environ["ARLO_USERNAME"],
-        password=os.environ["ARLO_PASSWORD"],
-        library_days=max(DAYS_BACK, 1),
-        synchronous_mode=True,
-        tfa_source=os.getenv("ARLO_TFA_SOURCE", "console"),
-        tfa_type=os.getenv("ARLO_TFA_TYPE", "email"),
-        storage_dir=str(SESSION_DIR),
-    )
-
-
 def clip_filename(created_at_ms: int) -> str:
     dt = datetime.fromtimestamp(created_at_ms / 1000, tz=timezone.utc).astimezone(
         EASTERN_TZ
@@ -115,7 +102,7 @@ def main() -> None:
     SESSION_DIR.mkdir(exist_ok=True)
 
     log.info("Connecting to Arlo...")
-    ar = connect_arlo()
+    ar = connect_arlo(library_days=DAYS_BACK, storage_dir=SESSION_DIR)
 
     camera = next((c for c in ar.cameras if c.name == CAMERA_NAME), None)
     if camera is None:
