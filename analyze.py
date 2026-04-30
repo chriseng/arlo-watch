@@ -44,9 +44,9 @@ PROMPT = """Analyze this security camera clip and return ONLY a valid JSON objec
 - screenshot_reason (string: brief explanation of why that frame best represents the clip)
 
 Animal identification rules:
-- Do not guess species. If species cannot be identified from visible evidence alone, use a broader label such as "bird", "small mammal", "cat", "dog", "deer", "raccoon-like animal", or "unknown animal".
+- Guess bird species on visual traits in the clip.
+- Try to guess other species based on visible evidence, but if the animal cannot be identified with reasonable degree of confidence, use a broader label such as "small mammal", "cat", "dog", "deer", "raccoon-like animal", or "unknown animal".
 - Base identification only on directly visible traits in the clip, such as size, silhouette, movement, tail shape, ear shape, wings, beak, markings, or antlers. Do not infer species from location, typical neighborhood wildlife, or prior probability.
-- In low-quality, distant, dark, infrared, blurry, or partially occluded footage, prefer broader labels over specific species.
 - Count only distinct animals that are actually visible. If repeated appearances may be the same animal, prefer the lower count unless multiple animals are clearly present at once.
 - In the activity field, mention animal species only when the visual evidence is strong. Otherwise use the broader label.
 
