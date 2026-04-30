@@ -4,6 +4,9 @@ import json
 import logging
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +31,12 @@ log = logging.getLogger(__name__)
 
 CLIPS_DIR = Path(os.getenv("CLIPS_DIR", "html/clips"))
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
+STRIP_AUDIO_BEFORE_UPLOAD = os.getenv("STRIP_AUDIO_BEFORE_UPLOAD", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 EASTERN_TZ = ZoneInfo("America/New_York")
 
 PROMPT = """Analyze this security camera clip and return ONLY a valid JSON object with these fields:
@@ -62,6 +71,36 @@ UPLOAD_TIMEOUT_SECONDS = 300
 GENERATE_RETRIES = 3
 
 
+def strip_audio_for_upload(path: Path) -> Path:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        raise RuntimeError(
+            "STRIP_AUDIO_BEFORE_UPLOAD is enabled, but ffmpeg is not installed or not on PATH"
+        )
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="arlo-watch-upload-"))
+    stripped_path = temp_dir / f"{path.stem}.noaudio.mp4"
+    command = [
+        ffmpeg_path,
+        "-y",
+        "-i",
+        str(path),
+        "-an",
+        "-c:v",
+        "copy",
+        str(stripped_path),
+    ]
+    log.info("Stripping audio from %s before upload...", path.name)
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        message = (e.stderr or e.stdout or "").strip()
+        raise RuntimeError(
+            f"ffmpeg failed while stripping audio from {path.name}: {message or e}"
+        ) from e
+    return stripped_path
+
+
 def is_retryable_generate_error(error: Exception) -> bool:
     message = str(error)
     return "503 UNAVAILABLE" in message or "429" in message
@@ -89,8 +128,15 @@ def upload_and_wait(client: genai.Client, path: Path):
 
 
 def analyze_clip(client: genai.Client, path: Path) -> dict:
-    video_file = upload_and_wait(client, path)
+    upload_path = path
+    temp_dir = None
+    video_file = None
+    if STRIP_AUDIO_BEFORE_UPLOAD:
+        upload_path = strip_audio_for_upload(path)
+        temp_dir = upload_path.parent
+
     try:
+        video_file = upload_and_wait(client, upload_path)
         for attempt in range(1, GENERATE_RETRIES + 1):
             try:
                 response = client.models.generate_content(
@@ -115,10 +161,13 @@ def analyze_clip(client: genai.Client, path: Path) -> dict:
                 )
                 time.sleep(delay)
     finally:
-        try:
-            client.files.delete(name=video_file.name)
-        except Exception as e:
-            log.warning("Could not delete Gemini file %s: %s", video_file.name, e)
+        if video_file is not None:
+            try:
+                client.files.delete(name=video_file.name)
+            except Exception as e:
+                log.warning("Could not delete Gemini file %s: %s", video_file.name, e)
+        if temp_dir is not None:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def parse_json_response(response, clip_name: str) -> dict:

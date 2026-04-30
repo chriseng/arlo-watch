@@ -188,9 +188,18 @@ Other optional overrides:
 | `MIN_CLIP_DURATION_SECONDS` | `5` | Skip clips shorter than this threshold using metadata first, then MP4 duration verification after download |
 | `EXCLUDED_OBJ_CATEGORIES` | unset | JSON array or comma-separated list of `objCategory` values to skip during download |
 | `GEMINI_MODEL` | `gemini-3.1-flash-lite-preview` | Gemini model to use for analysis |
+| `STRIP_AUDIO_BEFORE_UPLOAD` | `false` | When `true`, `analyze.py` uses `ffmpeg` to create a temporary no-audio MP4 for upload to avoid models that reject audio input |
 | `CLIP_RETENTION_DAYS` | `7` | Retention window used by `scripts/cleanup_old_clips.py` |
 
 `download.py` accepts `--latest N` to restrict a run to the most recent `N` videos found within the configured `DAYS_BACK` window.
+
+If you need to avoid model errors such as `Audio input modality is not enabled`, set this in `.env`:
+
+```env
+STRIP_AUDIO_BEFORE_UPLOAD=true
+```
+
+This is off by default. When enabled, `analyze.py` requires `ffmpeg` on your `PATH` and uploads a temporary video-only copy instead of the original MP4.
 
 ---
 
