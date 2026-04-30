@@ -540,7 +540,12 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
       source.type = 'video/mp4';
       video.appendChild(source);
 
+      video.addEventListener('loadeddata', () => {{
+        void video.play().catch(() => {{}});
+      }}, {{ once: true }});
+
       shell.replaceWith(video);
+      video.load();
     }}
 
     function render(day) {{
