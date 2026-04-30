@@ -254,6 +254,10 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
       cursor: pointer;
       font: inherit;
     }}
+    button:disabled {{
+      opacity: .35;
+      cursor: default;
+    }}
     .summary-meta {{
       margin-left: auto;
       color: var(--muted);
@@ -373,6 +377,8 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
       <label for="dayPicker">Day</label>
       <input id="dayPicker" type="date">
       <button id="showLatest" type="button">Latest Day</button>
+      <button id="prevDay" type="button">&lt;</button>
+      <button id="nextDay" type="button">&gt;</button>
       <div id="summaryMeta" class="summary-meta"></div>
     </div>
     <div id="content"></div>
@@ -382,15 +388,24 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
     const daySummaries = {summary_json};
     const dayPicker = document.getElementById('dayPicker');
     const showLatest = document.getElementById('showLatest');
+    const prevDay = document.getElementById('prevDay');
+    const nextDay = document.getElementById('nextDay');
     const content = document.getElementById('content');
     const summaryMeta = document.getElementById('summaryMeta');
     const days = [...new Set(entries.map((entry) => entry.day))].sort().reverse();
+
+    function updateNavButtons(day) {{
+      const idx = days.indexOf(day);
+      prevDay.disabled = idx === days.length - 1;
+      nextDay.disabled = idx === 0;
+    }}
 
     function render(day) {{
       const filtered = entries.filter((entry) => entry.day === day);
       summaryMeta.textContent = filtered.length ? `${{filtered.length}} clip(s) on ${{day}}` : `0 clip(s) on ${{day}}`;
       if (!filtered.length) {{
         content.innerHTML = '<div class="empty">No clips for the selected day.</div>';
+        updateNavButtons(day);
         return;
       }}
 
@@ -432,6 +447,7 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
       }}).join('');
 
       content.innerHTML = `${{summaryHtml}}<div class="rows">${{rows}}</div>`;
+      updateNavButtons(day);
     }}
 
     if (days.length) {{
@@ -448,6 +464,20 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
       if (!days.length) return;
       dayPicker.value = days[0];
       render(days[0]);
+    }});
+    prevDay.addEventListener('click', () => {{
+      const idx = days.indexOf(dayPicker.value);
+      if (idx < days.length - 1) {{
+        dayPicker.value = days[idx + 1];
+        render(days[idx + 1]);
+      }}
+    }});
+    nextDay.addEventListener('click', () => {{
+      const idx = days.indexOf(dayPicker.value);
+      if (idx > 0) {{
+        dayPicker.value = days[idx - 1];
+        render(days[idx - 1]);
+      }}
     }});
   </script>
 </body>
