@@ -35,13 +35,25 @@ PROMPT = """Analyze this security camera clip and return ONLY a valid JSON objec
 - persons (integer: number of distinct people visible)
 - vehicles (integer: number of distinct vehicles visible)
 - animals (integer: number of distinct animals visible)
-- activity (string: one sentence describing what happens in the clip, up to a paragraph if necessary. identify species of birds when able)
+- activity (string: one sentence describing what happens in the clip, up to a paragraph if necessary. use broad animal labels unless species-level evidence is visually clear)
 - notable_events (array of strings: specific actions, e.g. "person approached door")
 - motion_area (string: where primary motion occurs, e.g. "left", "center", "right", "full frame")
 - time_of_day (string: one of "day", "dusk", "night", "dawn")
 - confidence (string: one of "high", "medium", "low" — your confidence in the analysis)
 - screenshot_timestamp_seconds (number: best timestamp for a single representative screenshot from this clip)
 - screenshot_reason (string: brief explanation of why that frame best represents the clip)
+
+Animal identification rules:
+- Do not guess species. If species cannot be identified from visible evidence alone, use a broader label such as "bird", "small mammal", "cat", "dog", "deer", "raccoon-like animal", or "unknown animal".
+- Base identification only on directly visible traits in the clip, such as size, silhouette, movement, tail shape, ear shape, wings, beak, markings, or antlers. Do not infer species from location, typical neighborhood wildlife, or prior probability.
+- In low-quality, distant, dark, infrared, blurry, or partially occluded footage, prefer broader labels over specific species.
+- Count only distinct animals that are actually visible. If repeated appearances may be the same animal, prefer the lower count unless multiple animals are clearly present at once.
+- In the activity field, mention animal species only when the visual evidence is strong. Otherwise use the broader label.
+
+Reasoning order:
+1. Determine whether animals are present and count distinct visible animals conservatively.
+2. Identify each animal only to the most specific level justified by visible evidence.
+3. Write the activity description conservatively and factually.
 
 Return only the JSON object. No markdown fences, no explanation, no extra text."""
 
