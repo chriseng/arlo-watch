@@ -157,20 +157,44 @@ For Gmail, generate an **App Password** (not your regular password) at myaccount
 
 ## Configuration reference
 
-All settings go in `.env`. Optional overrides:
+All settings go in `.env`.
+
+Required:
+
+| Variable | Description |
+|---|---|
+| `ARLO_USERNAME` | Arlo account email/username |
+| `ARLO_PASSWORD` | Arlo account password |
+| `ARLO_CAMERA_NAME` | Exact camera name to download from |
+| `GEMINI_API_KEY` | Gemini API key used by `analyze.py` |
+
+Common 2FA settings:
+
+| Variable | Default | Description |
+|---|---|---|
+| `ARLO_TFA_SOURCE` | `console` | 2FA provider mode used by pyaarlo, such as interactive `console` or unattended `imap` |
+| `ARLO_TFA_TYPE` | `email` | 2FA delivery type expected by pyaarlo |
+| `ARLO_TFA_HOST` | unset | IMAP or REST host used for unattended 2FA |
+| `ARLO_TFA_USER` | `ARLO_USERNAME` | Mailbox/API username used for unattended 2FA |
+| `ARLO_TFA_PASSWORD` | `ARLO_PASSWORD` | Mailbox/API password or token used for unattended 2FA |
+| `ARLO_TFA_NICKNAME` | unset | Optional mailbox/device nickname passed through to pyaarlo |
+| `ARLO_TFA_TIMEOUT` | `3` | Seconds between IMAP/REST polling attempts |
+| `ARLO_TFA_TOTAL_TIMEOUT` | `60` | Total seconds to wait for a 2FA code |
+| `ARLO_TFA_RETRIES` | unset | Optional explicit retry count for the 2FA provider |
+| `ARLO_TFA_DELAY` | unset | Optional delay between 2FA retries |
+| `ARLO_TFA_CIPHER_LIST` | unset | Optional TLS cipher list override for the 2FA connection |
+
+Other optional overrides:
 
 | Variable | Default | Description |
 |---|---|---|
 | `CLIPS_DIR` | `html/clips` | Directory where clips, screenshots, and JSON are saved |
 | `SESSION_DIR` | `.arlo_session` | pyaarlo session token storage |
 | `DAYS_BACK` | `1` | How many days of library to fetch per run |
+| `MIN_CLIP_DURATION_SECONDS` | `5` | Skip clips shorter than this threshold using metadata first, then MP4 duration verification after download |
 | `EXCLUDED_OBJ_CATEGORIES` | unset | JSON array or comma-separated list of `objCategory` values to skip during download |
 | `GEMINI_MODEL` | `gemini-3.1-flash-lite-preview` | Gemini model to use for analysis |
-| `ARLO_TFA_HOST` | unset | IMAP or REST host used for unattended 2FA |
-| `ARLO_TFA_USER` | `ARLO_USERNAME` | Mailbox/API username used for unattended 2FA |
-| `ARLO_TFA_PASSWORD` | `ARLO_PASSWORD` | Mailbox/API password or token used for unattended 2FA |
-| `ARLO_TFA_TIMEOUT` | `3` | Seconds between IMAP/REST polling attempts |
-| `ARLO_TFA_TOTAL_TIMEOUT` | `60` | Total seconds to wait for a 2FA code |
+| `CLIP_RETENTION_DAYS` | `7` | Retention window used by `scripts/cleanup_old_clips.py` |
 
 `download.py` accepts `--latest N` to restrict a run to the most recent `N` videos found within the configured `DAYS_BACK` window.
 
