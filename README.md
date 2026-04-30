@@ -196,10 +196,12 @@ Other optional overrides:
 
 ## Storage
 
-Clips are not deleted automatically. Plan for roughly 50–200 MB per day depending on clip frequency and length. Add a cron job to purge old files if needed:
+`run.sh` automatically runs `scripts/cleanup_old_clips.py` on every cycle before analysis and gallery generation. By default, that script removes `.mp4` clips older than `CLIP_RETENTION_DAYS` (default `7`).
 
-```bash
-# Delete clips older than 30 days
-find /home/youruser/arlo-watch/clips -name "*.mp4" -mtime +30 -delete
-find /home/youruser/arlo-watch/clips -name "*.json" -mtime +30 -delete
+Plan for roughly 50–200 MB per day depending on clip frequency and length. If you want a different retention window, set `CLIP_RETENTION_DAYS` in `.env`:
+
+```env
+CLIP_RETENTION_DAYS=30
 ```
+
+If you want cleanup to also remove `.json` summaries or `.jpg` screenshots for expired clips, run `scripts/cleanup_old_clips.py` manually with `--purge-summaries` and/or `--purge-screenshots`.
