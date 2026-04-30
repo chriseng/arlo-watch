@@ -6,7 +6,8 @@ Downloads clips from a specific Arlo camera and generates AI-powered JSON summar
 
 1. `download.py` — authenticates to Arlo, fetches the library for the target camera, downloads any clips not already on disk.
 2. `analyze.py` — for each `.mp4` without a matching `.json`, uploads the clip to Gemini, waits for analysis, and writes a JSON summary file alongside it.
-3. `run.sh` — runs both scripts in sequence; invoke this from cron.
+3. `generate_gallery.py` — reads the clip summaries and screenshots and builds the static gallery in `html/`.
+4. `run.sh` — runs the full download, cleanup, analysis, and gallery-generation sequence; invoke this from cron.
 
 Clips accumulate in `html/clips/`. Each clip gets a companion JSON file, e.g.:
 
