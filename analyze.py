@@ -28,7 +28,6 @@ log = logging.getLogger(__name__)
 
 CLIPS_DIR = Path(os.getenv("CLIPS_DIR", "html/clips"))
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
-MIN_CLIP_DURATION_SECONDS = float(os.getenv("MIN_CLIP_DURATION_SECONDS", "5"))
 EASTERN_TZ = ZoneInfo("America/New_York")
 
 PROMPT = """Analyze this security camera clip and return ONLY a valid JSON object with these fields:
@@ -200,18 +199,6 @@ def extract_screenshot(clip: Path, timestamp_seconds: float, dest: Path) -> None
         capture.release()
 
 
-def get_clip_duration(clip: Path) -> float | None:
-    capture = cv2.VideoCapture(str(clip))
-    if not capture.isOpened():
-        return None
-    try:
-        fps = capture.get(cv2.CAP_PROP_FPS) or 0
-        frame_count = capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0
-        return frame_count / fps if fps > 0 and frame_count > 0 else None
-    finally:
-        capture.release()
-
-
 def clip_needs_analysis(clip: Path) -> bool:
     json_path = clip.with_suffix(".json")
     if not json_path.exists():
@@ -237,25 +224,7 @@ def main() -> None:
     with genai.Client(api_key=os.environ["GEMINI_API_KEY"]) as client:
         clips = sorted(CLIPS_DIR.glob("*.mp4"))
         pending = [c for c in clips if clip_needs_analysis(c)]
-
-        skipped = []
-        for clip in pending[:]:
-            duration = get_clip_duration(clip)
-            if duration is not None and duration < MIN_CLIP_DURATION_SECONDS:
-                log.info(
-                    "Skipping %s (%.1fs < %.1fs minimum)",
-                    clip.name,
-                    duration,
-                    MIN_CLIP_DURATION_SECONDS,
-                )
-                skipped.append(clip)
-                pending.remove(clip)
-
-        log.info(
-            "%d clip(s) pending analysis, %d skipped (too short).",
-            len(pending),
-            len(skipped),
-        )
+        log.info("%d clip(s) pending analysis.", len(pending))
 
         succeeded = 0
         failed = 0
