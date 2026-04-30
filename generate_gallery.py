@@ -10,8 +10,6 @@ from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
 
 
 load_dotenv()
@@ -74,7 +72,7 @@ def is_retryable_generate_error(error: Exception) -> bool:
     return "503 UNAVAILABLE" in message or "429" in message
 
 
-def summarize_day(client: genai.Client, day: str, records: list[dict]) -> dict:
+def summarize_day(client, types_module, day: str, records: list[dict]) -> dict:
     payload = json.dumps(records, indent=2)
     for attempt in range(1, GENERATE_RETRIES + 1):
         try:
@@ -84,7 +82,7 @@ def summarize_day(client: genai.Client, day: str, records: list[dict]) -> dict:
                     f"Day: {day}\n\nClip JSON records:\n{payload}",
                     DAY_SUMMARY_PROMPT,
                 ],
-                config=types.GenerateContentConfig(
+                config=types_module.GenerateContentConfig(
                     response_mime_type="application/json",
                     temperature=0,
                 ),
@@ -153,25 +151,42 @@ def build_day_summaries(entries: list[dict]) -> dict:
     cache = load_summary_cache()
     updated_cache = dict(cache)
     summaries = {}
+    pending_days = []
 
-    with genai.Client(api_key=os.environ["GEMINI_API_KEY"]) as client:
-        for day, records in grouped.items():
+    for day, records in grouped.items():
+        digest = day_digest(records)
+        cached = cache.get(day)
+
+        # Historical days are immutable once summarized. Only the most recent
+        # day remains eligible for refresh as new clips arrive.
+        if day != latest_day and cached and cached.get("summary"):
+            summaries[day] = cached["summary"]
+            continue
+
+        if cached and cached.get("digest") == digest and cached.get("summary"):
+            summaries[day] = cached["summary"]
+            continue
+
+        pending_days.append((day, records, digest))
+
+    if pending_days:
+        from google import genai
+        from google.genai import types
+
+        with genai.Client(api_key=os.environ["GEMINI_API_KEY"]) as client:
+            for day, records, digest in pending_days:
+                summary = summarize_day(client, types, day, records)
+                updated_cache[day] = {"digest": digest, "summary": summary}
+                summaries[day] = summary
+
+    for day, records in grouped.items():
+        if day not in summaries:
             digest = day_digest(records)
-            cached = cache.get(day)
-
-            # Historical days are immutable once summarized. Only the most recent
-            # day remains eligible for refresh as new clips arrive.
-            if day != latest_day and cached and cached.get("summary"):
+            cached = updated_cache.get(day)
+            if cached and cached.get("summary"):
                 summaries[day] = cached["summary"]
                 continue
-
-            if cached and cached.get("digest") == digest and cached.get("summary"):
-                summaries[day] = cached["summary"]
-                continue
-
-            summary = summarize_day(client, day, records)
-            updated_cache[day] = {"digest": digest, "summary": summary}
-            summaries[day] = summary
+            raise RuntimeError(f"Missing day summary for {day} with digest {digest}")
 
     if updated_cache != cache:
         save_summary_cache(updated_cache)
@@ -309,6 +324,39 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
       display: block;
       background: #181512;
     }}
+    .media-shell {{
+      position: relative;
+      aspect-ratio: 16 / 9;
+      background: #181512;
+      overflow: hidden;
+    }}
+    .media-shell img {{
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }}
+    .media-shell .load-video {{
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      border: 1px solid rgba(255,255,255,.35);
+      background: rgba(27,27,24,.76);
+      backdrop-filter: blur(8px);
+    }}
+    .media-shell .load-video:hover {{
+      background: rgba(27,27,24,.88);
+    }}
+    .preview-fallback {{
+      height: 100%;
+      display: grid;
+      place-items: center;
+      color: rgba(255,255,255,.8);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-size: .82rem;
+    }}
     .stamp {{
       margin-top: 10px;
       color: var(--muted);
@@ -393,6 +441,25 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
     const content = document.getElementById('content');
     const summaryMeta = document.getElementById('summaryMeta');
     const days = [...new Set(entries.map((entry) => entry.day))].sort().reverse();
+    const dayIndex = new Map();
+    const entryIndex = new Map();
+    const renderCache = new Map();
+
+    for (const entry of entries) {{
+      if (!dayIndex.has(entry.day)) dayIndex.set(entry.day, []);
+      dayIndex.get(entry.day).push(entry);
+      entryIndex.set(entry.clip_href, entry);
+    }}
+
+    function escapeHtml(value) {{
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({{
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }}[char]));
+    }}
 
     function updateNavButtons(day) {{
       const idx = days.indexOf(day);
@@ -400,8 +467,84 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
       nextDay.disabled = idx === 0;
     }}
 
+    function buildSummaryHtml(day) {{
+      const summary = daySummaries[day];
+      if (!summary) return '';
+      const headline = escapeHtml(summary.headline || day);
+      const body = escapeHtml(summary.summary || '');
+      const highlights = Array.isArray(summary.highlights) ? summary.highlights : [];
+      return `
+        <section class="day-summary">
+          <h2>${{headline}}</h2>
+          <p>${{body}}</p>
+          ${{highlights.length ? `<ul>${{highlights.map((item) => `<li>${{escapeHtml(item)}}</li>`).join('')}}</ul>` : ''}}
+        </section>
+      `;
+    }}
+
+    function buildMediaPreview(entry) {{
+      const screenshotHref = entry.screenshot_href ? escapeHtml(entry.screenshot_href) : '';
+      const clipHref = escapeHtml(entry.clip_href);
+      const image = screenshotHref
+        ? `<img src="${{screenshotHref}}" alt="Preview for ${{escapeHtml(entry.clip_file)}}" loading="lazy" decoding="async">`
+        : '<div class="preview-fallback">Video preview</div>';
+      return `
+        <div class="media-shell" data-video-shell>
+          ${{image}}
+          <button class="load-video" type="button" data-load-video="${{clipHref}}">Load video</button>
+        </div>
+      `;
+    }}
+
+    function buildRowsHtml(filtered) {{
+      return filtered.map((entry) => {{
+        const events = Array.isArray(entry.json.notable_events) ? entry.json.notable_events : [];
+        const duration = entry.duration_seconds != null ? ` (${{entry.duration_seconds}}s)` : '';
+        return `
+          <article class="row">
+            <section class="cell">
+              ${{buildMediaPreview(entry)}}
+              <div class="stamp">${{escapeHtml(entry.time)}}${{duration}}</div>
+              <div class="media-links">
+                <a href="${{escapeHtml(entry.clip_href)}}" target="_blank" rel="noreferrer">Open clip</a>
+                ${{entry.screenshot_href ? `<a href="${{escapeHtml(entry.screenshot_href)}}" target="_blank" rel="noreferrer">Open screenshot</a>` : ''}}
+              </div>
+            </section>
+            <section class="cell">
+              <h3>Activity</h3>
+              <p class="activity">${{escapeHtml(entry.json.activity || '')}}</p>
+            </section>
+            <section class="cell">
+              <h3>Notable Events</h3>
+              ${{events.length ? `<ul class="events">${{events.map((item) => `<li>${{escapeHtml(item)}}</li>`).join('')}}</ul>` : '<p class="activity">None recorded.</p>'}}
+            </section>
+          </article>
+        `;
+      }}).join('');
+    }}
+
+    function hydrateVideo(button) {{
+      if (!button) return;
+      const clipHref = button.dataset.loadVideo;
+      const entry = entryIndex.get(clipHref);
+      const shell = button.closest('[data-video-shell]');
+      if (!entry || !shell) return;
+
+      const video = document.createElement('video');
+      video.controls = true;
+      video.preload = 'metadata';
+      if (entry.screenshot_href) video.poster = entry.screenshot_href;
+
+      const source = document.createElement('source');
+      source.src = entry.clip_href;
+      source.type = 'video/mp4';
+      video.appendChild(source);
+
+      shell.replaceWith(video);
+    }}
+
     function render(day) {{
-      const filtered = entries.filter((entry) => entry.day === day);
+      const filtered = dayIndex.get(day) || [];
       summaryMeta.textContent = filtered.length ? `${{filtered.length}} clip(s) on ${{day}}` : `0 clip(s) on ${{day}}`;
       if (!filtered.length) {{
         content.innerHTML = '<div class="empty">No clips for the selected day.</div>';
@@ -409,44 +552,11 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
         return;
       }}
 
-      const summary = daySummaries[day];
-      const summaryHtml = summary ? `
-        <section class="day-summary">
-          <h2>${{summary.headline || day}}</h2>
-          <p>${{summary.summary || ''}}</p>
-          ${{summary.highlights?.length ? `<ul>${{summary.highlights.map((item) => `<li>${{item}}</li>`).join('')}}</ul>` : ''}}
-        </section>
-      ` : '';
+      if (!renderCache.has(day)) {{
+        renderCache.set(day, `${{buildSummaryHtml(day)}}<div class="rows">${{buildRowsHtml(filtered)}}</div>`);
+      }}
 
-      const rows = filtered.map((entry) => {{
-        const events = Array.isArray(entry.json.notable_events) ? entry.json.notable_events : [];
-        const duration = entry.duration_seconds != null ? ` (${{entry.duration_seconds}}s)` : '';
-        const poster = entry.screenshot_href ? ` poster="${{entry.screenshot_href}}"` : '';
-        return `
-          <article class="row">
-            <section class="cell">
-              <video controls preload="metadata"${{poster}}>
-                <source src="${{entry.clip_href}}" type="video/mp4">
-              </video>
-              <div class="stamp">${{entry.time}}${{duration}}</div>
-              <div class="media-links">
-                <a href="${{entry.clip_href}}" target="_blank" rel="noreferrer">Open clip</a>
-                ${{entry.screenshot_href ? `<a href="${{entry.screenshot_href}}" target="_blank" rel="noreferrer">Open screenshot</a>` : ''}}
-              </div>
-            </section>
-            <section class="cell">
-              <h3>Activity</h3>
-              <p class="activity">${{entry.json.activity || ''}}</p>
-            </section>
-            <section class="cell">
-              <h3>Notable Events</h3>
-              ${{events.length ? `<ul class="events">${{events.map((item) => `<li>${{item}}</li>`).join('')}}</ul>` : '<p class="activity">None recorded.</p>'}}
-            </section>
-          </article>
-        `;
-      }}).join('');
-
-      content.innerHTML = `${{summaryHtml}}<div class="rows">${{rows}}</div>`;
+      content.innerHTML = renderCache.get(day);
       updateNavButtons(day);
     }}
 
@@ -478,6 +588,11 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
         dayPicker.value = days[idx - 1];
         render(days[idx - 1]);
       }}
+    }});
+    content.addEventListener('click', (event) => {{
+      const button = event.target.closest('[data-load-video]');
+      if (!button) return;
+      hydrateVideo(button);
     }});
   </script>
 </body>
