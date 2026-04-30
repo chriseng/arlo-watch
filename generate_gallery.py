@@ -1,13 +1,18 @@
 """Build a single-file HTML gallery from analyzed Arlo clips."""
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
 
-CLIPS_DIR = Path("clips")
+CLIPS_DIR = Path(os.getenv("CLIPS_DIR", "html/clips"))
 HTML_DIR = Path("html")
 OUTPUT_PATH = HTML_DIR / "index.html"
+
+
+def relative_href(path: Path) -> str:
+    return os.path.relpath(path, OUTPUT_PATH.parent).replace(os.sep, "/")
 
 
 def load_entries() -> list[dict]:
@@ -25,9 +30,9 @@ def load_entries() -> list[dict]:
                 "time": dt.strftime("%I:%M:%S %p").lstrip("0"),
                 "timestamp_est": timestamp_est,
                 "clip_file": clip_file,
-                "clip_href": f"../clips/{clip_file}",
+                "clip_href": relative_href(CLIPS_DIR / clip_file),
                 "screenshot_file": data.get("screenshot_file"),
-                "screenshot_href": f"../clips/{data['screenshot_file']}"
+                "screenshot_href": relative_href(CLIPS_DIR / data["screenshot_file"])
                 if data.get("screenshot_file")
                 else None,
                 "json": data,

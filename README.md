@@ -8,10 +8,10 @@ Downloads clips from a specific Arlo camera and generates AI-powered JSON summar
 2. `analyze.py` — for each `.mp4` without a matching `.json`, uploads the clip to Gemini, waits for analysis, and writes a JSON summary file alongside it.
 3. `run.sh` — runs both scripts in sequence; invoke this from cron.
 
-Clips accumulate in `clips/`. Each clip gets a companion JSON file, e.g.:
+Clips accumulate in `html/clips/`. Each clip gets a companion JSON file, e.g.:
 
 ```
-clips/
+html/clips/
   20240115_143022_UTC.mp4
   20240115_143022_UTC.json
   ...
@@ -107,7 +107,7 @@ If the session expires and you're running unattended via cron, see **Unattended 
 bash run.sh
 ```
 
-Check `clips/` for downloaded `.mp4` and `.json` files, and `arlo_watch.log` for output.
+Check `html/clips/` for downloaded `.mp4`, `.jpg`, and `.json` files, and `arlo_watch.log` for output.
 
 ### 6. Schedule with cron
 
@@ -153,7 +153,7 @@ All settings go in `.env`. Optional overrides:
 
 | Variable | Default | Description |
 |---|---|---|
-| `CLIPS_DIR` | `clips` | Directory where clips are saved |
+| `CLIPS_DIR` | `html/clips` | Directory where clips, screenshots, and JSON are saved |
 | `SESSION_DIR` | `.arlo_session` | pyaarlo session token storage |
 | `DAYS_BACK` | `1` | How many days of library to fetch per run |
 | `GEMINI_MODEL` | `gemini-3.1-flash-lite-preview` | Gemini model to use for analysis |

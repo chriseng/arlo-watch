@@ -26,7 +26,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-CLIPS_DIR = Path(os.getenv("CLIPS_DIR", "clips"))
+CLIPS_DIR = Path(os.getenv("CLIPS_DIR", "html/clips"))
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
 EASTERN_TZ = ZoneInfo("America/New_York")
 

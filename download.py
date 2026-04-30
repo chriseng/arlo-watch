@@ -22,7 +22,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-CLIPS_DIR = Path(os.getenv("CLIPS_DIR", "clips"))
+CLIPS_DIR = Path(os.getenv("CLIPS_DIR", "html/clips"))
 SESSION_DIR = Path(os.getenv("SESSION_DIR", ".arlo_session"))
 CAMERA_NAME = os.environ["ARLO_CAMERA_NAME"]
 DAYS_BACK = int(os.getenv("DAYS_BACK", "1"))
@@ -72,7 +72,7 @@ def download_clip(recording, dest: Path) -> None:
 
 def main() -> None:
     args = parse_args()
-    CLIPS_DIR.mkdir(exist_ok=True)
+    CLIPS_DIR.mkdir(parents=True, exist_ok=True)
     SESSION_DIR.mkdir(exist_ok=True)
 
     log.info("Connecting to Arlo...")
