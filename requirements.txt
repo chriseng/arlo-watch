@@ -2,3 +2,4 @@ pyaarlo
 requests
 python-dotenv
 google-genai
+opencv-python-headless

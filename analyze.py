@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import cv2
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
@@ -39,11 +40,19 @@ PROMPT = """Analyze this security camera clip and return ONLY a valid JSON objec
 - motion_area (string: where primary motion occurs, e.g. "left", "center", "right", "full frame")
 - time_of_day (string: one of "day", "dusk", "night", "dawn")
 - confidence (string: one of "high", "medium", "low" — your confidence in the analysis)
+- screenshot_timestamp_seconds (number: best timestamp for a single representative screenshot from this clip)
+- screenshot_reason (string: brief explanation of why that frame best represents the clip)
 
 Return only the JSON object. No markdown fences, no explanation, no extra text."""
 
 POLL_INTERVAL_SECONDS = 5
 UPLOAD_TIMEOUT_SECONDS = 300
+GENERATE_RETRIES = 3
+
+
+def is_retryable_generate_error(error: Exception) -> bool:
+    message = str(error)
+    return "503 UNAVAILABLE" in message or "429" in message
 
 
 def upload_and_wait(client: genai.Client, path: Path):
@@ -70,15 +79,29 @@ def upload_and_wait(client: genai.Client, path: Path):
 def analyze_clip(client: genai.Client, path: Path) -> dict:
     video_file = upload_and_wait(client, path)
     try:
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=[video_file, PROMPT],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0,
-            ),
-        )
-        return parse_json_response(response, path.name)
+        for attempt in range(1, GENERATE_RETRIES + 1):
+            try:
+                response = client.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=[video_file, PROMPT],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0,
+                    ),
+                )
+                return parse_json_response(response, path.name)
+            except Exception as e:
+                if attempt == GENERATE_RETRIES or not is_retryable_generate_error(e):
+                    raise
+                delay = attempt * 5
+                log.warning(
+                    "Retrying Gemini analysis for %s after attempt %d/%d failed: %s",
+                    path.name,
+                    attempt,
+                    GENERATE_RETRIES,
+                    e,
+                )
+                time.sleep(delay)
     finally:
         try:
             client.files.delete(name=video_file.name)
@@ -142,10 +165,65 @@ def clip_timestamp_est(path: Path) -> str:
     )
 
 
+def screenshot_filename(path: Path) -> str:
+    return path.with_suffix(".jpg").name
+
+
+def extract_screenshot(clip: Path, timestamp_seconds: float, dest: Path) -> None:
+    capture = cv2.VideoCapture(str(clip))
+    if not capture.isOpened():
+        raise RuntimeError(f"Could not open video for screenshot extraction: {clip}")
+
+    try:
+        fps = capture.get(cv2.CAP_PROP_FPS) or 0
+        frame_count = capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        duration_seconds = frame_count / fps if fps > 0 and frame_count > 0 else None
+        seconds = max(0.0, float(timestamp_seconds))
+        if duration_seconds is not None:
+            seconds = min(seconds, max(duration_seconds - 0.1, 0.0))
+
+        capture.set(cv2.CAP_PROP_POS_MSEC, seconds * 1000)
+        ok, frame = capture.read()
+        if not ok:
+            if fps > 0:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, max(int(seconds * fps), 0))
+                ok, frame = capture.read()
+        if not ok:
+            raise RuntimeError(
+                f"Could not decode screenshot frame at {seconds:.2f}s for {clip.name}"
+            )
+
+        if not cv2.imwrite(str(dest), frame):
+            raise RuntimeError(f"Could not write screenshot file: {dest}")
+    finally:
+        capture.release()
+
+
+def clip_needs_analysis(clip: Path) -> bool:
+    json_path = clip.with_suffix(".json")
+    if not json_path.exists():
+        return True
+    try:
+        data = json.loads(json_path.read_text())
+    except Exception:
+        return True
+    required = [
+        "clip_file",
+        "timestamp_est",
+        "screenshot_timestamp_seconds",
+        "screenshot_reason",
+        "screenshot_file",
+    ]
+    if any(key not in data for key in required):
+        return True
+    screenshot_path = clip.with_suffix(".jpg")
+    return not screenshot_path.exists()
+
+
 def main() -> None:
     with genai.Client(api_key=os.environ["GEMINI_API_KEY"]) as client:
         clips = sorted(CLIPS_DIR.glob("*.mp4"))
-        pending = [c for c in clips if not c.with_suffix(".json").exists()]
+        pending = [c for c in clips if clip_needs_analysis(c)]
         log.info("%d clip(s) pending analysis.", len(pending))
 
         succeeded = 0
@@ -157,6 +235,11 @@ def main() -> None:
                 result = analyze_clip(client, clip)
                 result["clip_file"] = clip.name
                 result["timestamp_est"] = clip_timestamp_est(clip)
+                screenshot_seconds = float(result.get("screenshot_timestamp_seconds", 0))
+                screenshot_path = clip.with_suffix(".jpg")
+                extract_screenshot(clip, screenshot_seconds, screenshot_path)
+                result["screenshot_timestamp_seconds"] = screenshot_seconds
+                result["screenshot_file"] = screenshot_filename(clip)
                 out.write_text(json.dumps(result, indent=2))
                 log.info("Saved %s", out.name)
                 succeeded += 1
