@@ -55,7 +55,7 @@ All activity is logged to `arlo_watch.log` and stdout.
 2. Click **Get API key** → **Create API key**.
 3. Copy the key — you'll add it to `.env` below.
 
-The free tier allows 1,500 requests per day, which covers up to 1,500 clips/day at no cost. No billing setup required to start.
+As of April 30, 2026, the free tier allows 500 requests per day using `gemini-3.1-flash-lite-preview`. No billing setup required to start.
 
 ### 2. Install Python dependencies
 
