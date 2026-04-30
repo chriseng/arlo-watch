@@ -149,6 +149,7 @@ def build_day_summaries(entries: list[dict]) -> dict:
     for entry in entries:
         grouped[entry["day"]].append(entry["json"])
 
+    latest_day = max(grouped) if grouped else None
     cache = load_summary_cache()
     updated_cache = dict(cache)
     summaries = {}
@@ -157,9 +158,17 @@ def build_day_summaries(entries: list[dict]) -> dict:
         for day, records in grouped.items():
             digest = day_digest(records)
             cached = cache.get(day)
+
+            # Historical days are immutable once summarized. Only the most recent
+            # day remains eligible for refresh as new clips arrive.
+            if day != latest_day and cached and cached.get("summary"):
+                summaries[day] = cached["summary"]
+                continue
+
             if cached and cached.get("digest") == digest and cached.get("summary"):
                 summaries[day] = cached["summary"]
                 continue
+
             summary = summarize_day(client, day, records)
             updated_cache[day] = {"digest": digest, "summary": summary}
             summaries[day] = summary
