@@ -194,7 +194,7 @@ Other optional overrides:
 
 `download.py` accepts `--latest N` to restrict a run to the most recent `N` videos found within the configured `DAYS_BACK` window.
 
-If you need to avoid model errors such as `Audio input modality is not enabled`, set this in `.env`:
+If you need to avoid model errors such as `Audio input modality is not enabled` (seen with `gemma-4-31b-it` for example), set this in `.env`:
 
 ```env
 STRIP_AUDIO_BEFORE_UPLOAD=true
