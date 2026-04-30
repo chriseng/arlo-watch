@@ -26,6 +26,7 @@ CLIPS_DIR = Path(os.getenv("CLIPS_DIR", "html/clips"))
 SESSION_DIR = Path(os.getenv("SESSION_DIR", ".arlo_session"))
 CAMERA_NAME = os.environ["ARLO_CAMERA_NAME"]
 DAYS_BACK = int(os.getenv("DAYS_BACK", "1"))
+MIN_CLIP_DURATION_SECONDS = int(os.getenv("MIN_CLIP_DURATION_SECONDS", "5"))
 EASTERN_TZ = ZoneInfo("America/New_York")
 
 
@@ -110,6 +111,10 @@ def main() -> None:
         dest = CLIPS_DIR / filename
         if dest.exists():
             log.debug("Already have %s, skipping.", filename)
+            continue
+        clip_secs = getattr(rec, "mediaDurationSecond", None)
+        if clip_secs is not None and clip_secs < MIN_CLIP_DURATION_SECONDS:
+            log.info("Skipping %s (%ds < %ds minimum)", filename, clip_secs, MIN_CLIP_DURATION_SECONDS)
             continue
         log.info("Downloading %s...", filename)
         try:
