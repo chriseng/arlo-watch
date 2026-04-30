@@ -26,9 +26,10 @@ recordings = [
 ]
 
 print(f"Found {len(recordings)} recording(s)\n")
-for rec in recordings:
+for rec in recordings[:3]:
+    attrs = getattr(rec, "_attrs", {})
     print(f"  created_at : {rec.created_at}")
-    print(f"  duration   : {getattr(rec, 'duration', 'ATTR_MISSING')}")
+    print(f"  duration   : {attrs.get("mediaDurationSecond") if isinstance(attrs, dict) else None}")
     # dump raw data so we can see every available field
     raw = getattr(rec, '_attrs', None) or getattr(rec, '_data', None) or vars(rec)
     print(f"  raw keys   : {list(raw.keys()) if isinstance(raw, dict) else raw}")
