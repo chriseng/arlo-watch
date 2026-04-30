@@ -126,13 +126,7 @@ crontab -e
 Add a line to run every 30 minutes (adjust as needed):
 
 ```cron
-*/30 * * * * /home/youruser/arlo-watch/.venv/bin/python3 /home/youruser/arlo-watch/download.py >> /home/youruser/arlo-watch/arlo_watch.log 2>&1 && /home/youruser/arlo-watch/.venv/bin/python3 /home/youruser/arlo-watch/analyze.py >> /home/youruser/arlo-watch/arlo_watch.log 2>&1
-```
-
-Or, using `run.sh`:
-
-```cron
-*/30 * * * * cd /home/youruser/arlo-watch && source .venv/bin/activate && bash run.sh >> arlo_watch.log 2>&1
+*/30 * * * * cd /home/youruser/arlo-watch && source .venv/bin/activate && bash run.sh 2>&1 >> arlo_watch.log
 ```
 
 ---
