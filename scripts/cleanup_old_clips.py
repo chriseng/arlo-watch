@@ -2,7 +2,8 @@
 
 import argparse
 import os
-import time
+import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -11,6 +12,20 @@ load_dotenv()
 
 CLIPS_DIR = Path(os.getenv("CLIPS_DIR", "html/clips"))
 CLIP_RETENTION_DAYS = int(os.getenv("CLIP_RETENTION_DAYS", "7"))
+
+# Matches filenames like 20260429_181132_EDT.mp4
+_FILENAME_RE = re.compile(r"^(\d{8}_\d{6})_")
+
+
+def capture_time(mp4: Path) -> datetime | None:
+    """Parse capture datetime from filename (YYYYMMDD_HHMMSS_TZ). Returns UTC-naive datetime or None."""
+    m = _FILENAME_RE.match(mp4.name)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), "%Y%m%d_%H%M%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
 
 
 def main() -> None:
@@ -26,16 +41,25 @@ def main() -> None:
     if not clips_dir.is_dir():
         raise SystemExit(f"Clips directory not found: {clips_dir}")
 
-    cutoff = time.time() - args.retention_days * 86400
+    now = datetime.now(tz=timezone.utc)
+    cutoff_seconds = args.retention_days * 86400
     mp4s = sorted(clips_dir.glob("*.mp4"))
     print(f"Checking {len(mp4s)} clips in {clips_dir} (retention: {args.retention_days} days)")
 
     removed = 0
+    skipped = 0
     for mp4 in mp4s:
-        if mp4.stat().st_mtime >= cutoff:
+        captured = capture_time(mp4)
+        if captured is None:
+            print(f"  warning: cannot parse capture time from {mp4.name}, skipping")
+            skipped += 1
             continue
 
-        age_days = (time.time() - mp4.stat().st_mtime) / 86400
+        age_seconds = (now - captured).total_seconds()
+        if age_seconds < cutoff_seconds:
+            continue
+
+        age_days = age_seconds / 86400
         print(f"  {mp4.name}: {age_days:.1f} days old")
 
         targets = [mp4]
@@ -58,7 +82,7 @@ def main() -> None:
         removed += 1
 
     label = "would remove" if args.dry_run else "removed"
-    print(f"\nDone. {label} {removed} clip(s).")
+    print(f"\nDone. {label} {removed} clip(s)." + (f" Skipped {skipped} unparseable." if skipped else ""))
 
 
 if __name__ == "__main__":
