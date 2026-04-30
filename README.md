@@ -97,6 +97,12 @@ To restrict a run to the newest clips in the current `DAYS_BACK` window:
 python3 download.py --latest 5
 ```
 
+To skip clips whose metadata reports certain `objCategory` values, add this to `.env`:
+
+```env
+EXCLUDED_OBJ_CATEGORIES=["Vehicle","Animal","Motion"]
+```
+
 When prompted, enter the 2FA code sent to your email. pyaarlo saves the session token to `.arlo_session/` so subsequent runs won't need it. Session tokens typically last several weeks.
 
 If the session expires and you're running unattended via cron, see **Unattended 2FA** below.
@@ -158,6 +164,7 @@ All settings go in `.env`. Optional overrides:
 | `CLIPS_DIR` | `html/clips` | Directory where clips, screenshots, and JSON are saved |
 | `SESSION_DIR` | `.arlo_session` | pyaarlo session token storage |
 | `DAYS_BACK` | `1` | How many days of library to fetch per run |
+| `EXCLUDED_OBJ_CATEGORIES` | unset | JSON array or comma-separated list of `objCategory` values to skip during download |
 | `GEMINI_MODEL` | `gemini-3.1-flash-lite-preview` | Gemini model to use for analysis |
 | `ARLO_TFA_HOST` | unset | IMAP or REST host used for unattended 2FA |
 | `ARLO_TFA_USER` | `ARLO_USERNAME` | Mailbox/API username used for unattended 2FA |

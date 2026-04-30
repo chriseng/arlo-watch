@@ -1,6 +1,7 @@
 """Download new clips from a specific Arlo camera to the local clips directory."""
 
 import argparse
+import json
 import logging
 import os
 import struct
@@ -32,6 +33,29 @@ MIN_CLIP_DURATION_SECONDS = int(os.getenv("MIN_CLIP_DURATION_SECONDS", "5"))
 EASTERN_TZ = ZoneInfo("America/New_York")
 
 
+def parse_env_array(name: str) -> list[str]:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return []
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if isinstance(parsed, list):
+        return [str(item).strip() for item in parsed if str(item).strip()]
+    if isinstance(parsed, str):
+        value = parsed.strip()
+        return [value] if value else []
+
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+EXCLUDED_OBJ_CATEGORIES = parse_env_array("EXCLUDED_OBJ_CATEGORIES")
+EXCLUDED_OBJ_CATEGORY_KEYS = {value.casefold() for value in EXCLUDED_OBJ_CATEGORIES}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -44,6 +68,8 @@ def parse_args() -> argparse.Namespace:
     if args.latest is not None and args.latest < 1:
         parser.error("--latest must be a positive integer")
     return args
+
+
 def clip_filename(created_at_ms: int) -> str:
     dt = datetime.fromtimestamp(created_at_ms / 1000, tz=timezone.utc).astimezone(
         EASTERN_TZ
@@ -96,6 +122,18 @@ def download_clip(recording, dest: Path) -> None:
     tmp.rename(dest)
 
 
+def get_obj_categories(attrs: dict) -> list[str]:
+    value = attrs.get("objCategory")
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()] if str(value).strip() else []
+
+
 def main() -> None:
     args = parse_args()
     CLIPS_DIR.mkdir(parents=True, exist_ok=True)
@@ -115,6 +153,11 @@ def main() -> None:
     log.info("Fetching library (last %d day(s))...", DAYS_BACK)
     camera.update_media(wait=True)
     _, recordings = ar.ml.videos_for(camera)
+    if EXCLUDED_OBJ_CATEGORIES:
+        log.info(
+            "Excluding recordings with objCategory in %s",
+            EXCLUDED_OBJ_CATEGORIES,
+        )
     cutoff = datetime.now(timezone.utc) - timedelta(days=DAYS_BACK)
     recordings = [
         r
@@ -140,6 +183,19 @@ def main() -> None:
 
         # Pre-filter using metadata when available (saves a download)
         attrs = getattr(rec, "_attrs", {})
+        obj_categories = get_obj_categories(attrs) if isinstance(attrs, dict) else []
+        excluded_categories = [
+            category
+            for category in obj_categories
+            if category.casefold() in EXCLUDED_OBJ_CATEGORY_KEYS
+        ]
+        if excluded_categories:
+            log.info(
+                "Skipping %s due to excluded objCategory %s",
+                filename,
+                excluded_categories,
+            )
+            continue
         clip_secs = attrs.get("mediaDurationSecond") if isinstance(attrs, dict) else None
         if clip_secs is not None and clip_secs < MIN_CLIP_DURATION_SECONDS:
             log.info("Skipping %s (%ds < %ds minimum, from metadata)", filename, clip_secs, MIN_CLIP_DURATION_SECONDS)
