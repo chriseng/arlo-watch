@@ -2,7 +2,7 @@
 
 import argparse
 import os
-import subprocess
+import struct
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -14,20 +14,38 @@ MIN_CLIP_DURATION_SECONDS = int(os.getenv("MIN_CLIP_DURATION_SECONDS", "5"))
 
 
 def get_duration(mp4: Path) -> float:
-    result = subprocess.run(
-        [
-            "ffprobe", "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            str(mp4),
-        ],
-        capture_output=True,
-        text=True,
-    )
-    raw = result.stdout.strip()
-    if not raw:
-        raise ValueError(f"ffprobe returned no duration for {mp4}: {result.stderr.strip()}")
-    return float(raw)
+    """Parse duration from MP4 mvhd box. No external tools required."""
+    with mp4.open("rb") as f:
+        data = f.read()
+
+    pos = 0
+    while pos < len(data) - 8:
+        box_size = struct.unpack_from(">I", data, pos)[0]
+        box_type = data[pos + 4 : pos + 8]
+
+        if box_size < 8:
+            break
+
+        if box_type == b"moov":
+            pos += 8
+            continue
+
+        if box_type == b"mvhd":
+            mvhd = data[pos + 8 :]
+            version = mvhd[0]
+            if version == 1:
+                timescale = struct.unpack_from(">I", mvhd, 20)[0]
+                duration = struct.unpack_from(">Q", mvhd, 24)[0]
+            else:
+                timescale = struct.unpack_from(">I", mvhd, 12)[0]
+                duration = struct.unpack_from(">I", mvhd, 16)[0]
+            if timescale == 0:
+                raise ValueError(f"mvhd timescale is zero in {mp4}")
+            return duration / timescale
+
+        pos += box_size
+
+    raise ValueError(f"No mvhd box found in {mp4}")
 
 
 def delete_clip(mp4: Path, dry_run: bool) -> None:
