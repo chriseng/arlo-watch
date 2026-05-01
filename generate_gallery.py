@@ -123,6 +123,7 @@ def load_entries() -> list[dict]:
         if not clip_file or not timestamp_est:
             continue
         dt = datetime.fromisoformat(timestamp_est)
+        clip_path = CLIPS_DIR / clip_file
         entries.append(
             {
                 "day": dt.date().isoformat(),
@@ -130,7 +131,8 @@ def load_entries() -> list[dict]:
                 "timestamp_est": timestamp_est,
                 "duration_seconds": data.get("duration_seconds"),
                 "clip_file": clip_file,
-                "clip_href": relative_href(CLIPS_DIR / clip_file),
+                "clip_available": clip_path.exists(),
+                "clip_href": relative_href(clip_path),
                 "screenshot_file": data.get("screenshot_file"),
                 "screenshot_href": relative_href(CLIPS_DIR / data["screenshot_file"])
                 if data.get("screenshot_file")
@@ -357,6 +359,20 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
       letter-spacing: .08em;
       font-size: .82rem;
     }}
+    .media-note {{
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      padding: 10px 14px;
+      border: 1px solid rgba(255,255,255,.2);
+      background: rgba(27,27,24,.76);
+      color: rgba(255,255,255,.78);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-size: .76rem;
+      backdrop-filter: blur(8px);
+    }}
     .stamp {{
       margin-top: 10px;
       color: var(--muted);
@@ -372,6 +388,9 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
       color: var(--accent);
       text-decoration: none;
       border-bottom: 1px solid rgba(47,111,87,.3);
+    }}
+    .media-links .muted {{
+      color: var(--muted);
     }}
     .cell h3 {{
       margin: 0 0 10px;
@@ -484,14 +503,16 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
 
     function buildMediaPreview(entry) {{
       const screenshotHref = entry.screenshot_href ? escapeHtml(entry.screenshot_href) : '';
-      const clipHref = escapeHtml(entry.clip_href);
       const image = screenshotHref
         ? `<img src="${{screenshotHref}}" alt="Preview for ${{escapeHtml(entry.clip_file)}}" loading="lazy" decoding="async">`
         : '<div class="preview-fallback">Video preview</div>';
+      const action = entry.clip_available
+        ? `<button class="load-video" type="button" data-load-video="${{escapeHtml(entry.clip_href)}}">Load video</button>`
+        : '<div class="media-note">Video expired</div>';
       return `
         <div class="media-shell" data-video-shell>
           ${{image}}
-          <button class="load-video" type="button" data-load-video="${{clipHref}}">Load video</button>
+          ${{action}}
         </div>
       `;
     }}
@@ -506,7 +527,7 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
               ${{buildMediaPreview(entry)}}
               <div class="stamp">${{escapeHtml(entry.time)}}${{duration}}</div>
               <div class="media-links">
-                <a href="${{escapeHtml(entry.clip_href)}}" target="_blank" rel="noreferrer">Open clip</a>
+                ${{entry.clip_available ? `<a href="${{escapeHtml(entry.clip_href)}}" target="_blank" rel="noreferrer">Open clip</a>` : '<span class="muted">Clip expired</span>'}}
                 ${{entry.screenshot_href ? `<a href="${{escapeHtml(entry.screenshot_href)}}" target="_blank" rel="noreferrer">Open screenshot</a>` : ''}}
               </div>
             </section>
