@@ -420,7 +420,7 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
 <body>
   <div class="shell">
     <h1>Arlo Watch</h1>
-    <p class="sub">Per-video summaries with Gemini-selected screenshots and day summaries.</p>
+    <p class="sub">Per-video summaries with Gemini-selected screenshots and day summaries. All summaries are AI-generated and may contain errors.</p>
     <div class="toolbar">
       <label for="dayPicker">Day</label>
       <input id="dayPicker" type="date">
