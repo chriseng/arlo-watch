@@ -58,6 +58,7 @@ Animal identification rules:
 - Base identification only on directly visible traits in the clip, such as size, silhouette, movement, tail shape, ear shape, wings, beak, markings, or antlers. Do not infer species from location, typical neighborhood wildlife, or prior probability.
 - Count only distinct animals that are actually visible. If repeated appearances may be the same animal, prefer the lower count unless multiple animals are clearly present at once.
 - In the activity field, mention animal species only when the visual evidence is strong. Otherwise use the broader label.
+- Sometimes there will not be any animals in the video, especially when people are present. Be sure that animals are actually in the video before claiming that they are.
 
 Reasoning order:
 1. Determine whether animals are present and count distinct visible animals conservatively.
