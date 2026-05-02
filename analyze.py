@@ -52,6 +52,13 @@ PROMPT = """Analyze this security camera clip and return ONLY a valid JSON objec
 - screenshot_timestamp_seconds (number: best timestamp for a single representative screenshot from this clip)
 - screenshot_reason (string: brief explanation of why that frame best represents the clip)
 
+Core evidence rules:
+- Report only what is directly visible in the clip. Treat the clip as self-contained and ignore prior expectations, common scene patterns, or likely trigger causes.
+- A subject counts only if some part of it is actually visible in one or more frames. Do not infer a subject from motion alone, shadows, ripples, rustling foliage, off-frame sounds, scene context, or the fact that the camera recorded a clip.
+- Do not assume an animal, person, or vehicle entered or exited the frame unless that subject is visible.
+- If no clearly identifiable person, vehicle, or animal is visible, set persons=0, vehicles=0, animals=0 and describe the clip conservatively as empty or ambiguous motion.
+- When evidence is weak, prefer "unknown animal", "indistinct person", or "no clearly identifiable subject visible" over a specific claim.
+
 Animal identification rules:
 - Try as hard as possible to identify bird species on visual traits in the clip. If confidence in identification is not strong, qualify with a label such as "likely".
 - Try to guess other species based on visible evidence, but if the animal cannot be identified with reasonable degree of confidence, use a broader label such as "small mammal", "cat", "dog", "deer", "raccoon-like animal", or "unknown animal".
@@ -61,9 +68,10 @@ Animal identification rules:
 - Sometimes there will not be any animals in the video, especially when people are present. Be sure that animals are actually in the video before claiming that they are.
 
 Reasoning order:
-1. Determine whether animals are present and count distinct visible animals conservatively.
-2. Identify each animal only to the most specific level justified by visible evidence.
-3. Write the activity description conservatively and factually.
+1. First decide whether any person, vehicle, or animal is clearly visible at all. If not, return zero counts and an empty-scene or ambiguous-motion description.
+2. If subjects are visible, count distinct visible subjects conservatively.
+3. Identify each animal only to the most specific level justified by visible evidence.
+4. Write the activity description conservatively and factually, describing uncertainty plainly rather than filling gaps.
 
 Return only the JSON object. No markdown fences, no explanation, no extra text."""
 
