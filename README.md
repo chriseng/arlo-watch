@@ -5,7 +5,7 @@ Downloads clips from a specific Arlo camera and generates AI-powered JSON summar
 ## How it works
 
 1. `download.py` — authenticates to Arlo, fetches the library for the target camera, downloads any clips not already on disk.
-2. `analyze.py` — for each `.mp4` without a matching `.json`, uploads the clip to Gemini, waits for analysis, and writes a JSON summary file alongside it.
+2. `analyze.py` — for each `.mp4` without a matching `.json`, uploads the clip to Gemini, performs clip analysis, optionally runs a second animal-verification pass, and writes a JSON summary file alongside it.
 3. `generate_gallery.py` — reads the clip summaries and screenshots and builds the static gallery in `html/`.
 4. `run.sh` — runs the full download, cleanup, analysis, and gallery-generation sequence; invoke this from cron.
 
@@ -23,19 +23,67 @@ Example JSON output:
 ```json
 {
   "duration_seconds": 42,
-  "persons": 1,
+  "persons": 0,
   "vehicles": 0,
-  "animals": 0,
-  "activity": "A person walks up the driveway and stops near the garage.",
-  "notable_events": ["person entered frame from left", "person stopped near garage door"],
+  "animals": 1,
+  "activity": "A house finch is perched on the edge of a birdbath and drinks water.",
+  "notable_events": ["bird lands on birdbath edge", "bird drinks from birdbath"],
   "motion_area": "center",
   "time_of_day": "day",
   "confidence": "high",
+  "screenshot_timestamp_seconds": 12.4,
+  "evidence_timestamps_seconds": [11.8, 12.4, 13.1],
+  "screenshot_reason": "The bird is most visible in this frame.",
+  "screenshot_file": "20240115_143022_UTC.jpg",
+  "verification": {
+    "overrode_subject_claims": false,
+    "frame_assessment": "The contact sheet shows a clearly visible bird in multiple frames.",
+    "animal_frames": ["A2", "B2"],
+    "visible_subjects": ["house finch"],
+    "confidence": "medium"
+  },
+  "timestamp_est": "2024-01-15T14:30:22-05:00",
   "clip_file": "20240115_143022_UTC.mp4"
 }
 ```
 
 All activity is logged to `arlo_watch.log` and stdout.
+
+## Analysis behavior
+
+`analyze.py` is intentionally strict about **whether any subject is present at all** and somewhat looser about **species naming once an animal is clearly visible**.
+
+- Presence detection is conservative. The model is told not to infer animals, people, or vehicles from motion triggers, shadows, ripples, foliage, or scene context alone.
+- Species identification is more permissive after presence is established. If a bird is clearly visible, the model should try to name the most specific visually supported species and use qualifiers like `likely` only when the ID is genuinely uncertain.
+- The goal is to prefer false negatives on subject presence, while still allowing useful species labels when a real bird or animal is on camera.
+
+### Multi-phase animal verification
+
+Animal summaries use a two-stage flow:
+
+1. Gemini analyzes the uploaded video clip and produces the normal JSON summary, including the representative screenshot timestamp and 1-3 evidence timestamps.
+2. If and only if the first pass reports `animals > 0`, `analyze.py` builds a labeled 3x3 contact sheet from sampled frames across the clip and sends that sheet to Gemini for verification.
+3. The verification pass must point to specific grid cells such as `A2` or `B3` in `verification.animal_frames` where an animal is actually visible.
+4. If verification cannot confirm an animal in the still frames, the script overrides the original animal claim and rewrites the summary to an ambiguous/background-motion result.
+
+This is deliberately asymmetric:
+
+- Strict: "Is there actually an animal here?"
+- Looser: "If there is an animal here, what species is it most likely to be?"
+
+### Gemini call implications
+
+The verification pass increases Gemini usage, but only for clips where the first pass claims an animal.
+
+- Every analyzed clip uses 1 video upload and 1 Gemini generation call for the main clip analysis.
+- Clips with `animals = 0` stop there.
+- Clips with `animals > 0` add 1 contact-sheet image upload and 1 extra Gemini generation call for verification.
+
+In practice, that means:
+
+- Non-animal clips keep the original quota profile.
+- Suspected animal clips use a second Gemini call.
+- If your feed has frequent wildlife activity, daily Gemini usage will rise accordingly.
 
 ---
 
@@ -114,7 +162,7 @@ If the session expires and you're running unattended via cron, see **Unattended 
 bash run.sh
 ```
 
-Check `html/clips/` for downloaded `.mp4`, `.jpg`, and `.json` files, and `arlo_watch.log` for output.
+Check `html/clips/` for downloaded `.mp4`, `.jpg`, and `.json` files, and `arlo_watch.log` for output. For animal clips, inspect the `verification` object in the generated JSON if you need to understand why a wildlife claim was kept or overridden.
 
 ### 6. Schedule with cron
 
