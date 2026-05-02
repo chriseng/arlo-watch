@@ -62,11 +62,12 @@ Core evidence rules:
 
 Animal identification rules:
 - First decide whether an animal is actually visible. Once an animal is clearly visible, try aggressively to identify bird species from visual traits in the clip.
-- If the species guess is plausible but not certain, prefer a qualified label such as "likely house finch", "likely robin", or "likely sparrow" instead of the generic word "bird".
+- If one species is the clearly best fit from the visible traits, use the species name directly without "likely".
+- Use qualifiers such as "likely" or "possibly" only when there are multiple plausible species and the clip does not clearly distinguish between them.
 - Try to identify other animals as specifically as the visible evidence supports. If the animal cannot be identified with reasonable confidence, use a broader label such as "small mammal", "cat", "dog", "deer", "raccoon-like animal", or "unknown animal".
 - Base identification only on directly visible traits in the clip, such as size, silhouette, movement, tail shape, ear shape, wings, beak, markings, or antlers. Do not infer species from location, typical neighborhood wildlife, or prior probability.
 - Count only distinct animals that are actually visible. If repeated appearances may be the same animal, prefer the lower count unless multiple animals are clearly present at once.
-- In the activity field, if an animal is clearly visible, prefer the most specific visually supported label. Use qualifiers like "likely" or "possibly" rather than falling back to a generic label too quickly.
+- In the activity field, if an animal is clearly visible, prefer the most specific visually supported label. Do not add "likely" by default, and do not use it when one species is the clear best match.
 - Sometimes there will not be any animals in the video, especially when people are present. Be sure that animals are actually in the video before claiming that they are.
 
 Reasoning order:
