@@ -50,6 +50,7 @@ PROMPT = """Analyze this security camera clip and return ONLY a valid JSON objec
 - time_of_day (string: one of "day", "dusk", "night", "dawn")
 - confidence (string: one of "high", "medium", "low" — your confidence in the analysis)
 - screenshot_timestamp_seconds (number: best timestamp for a single representative screenshot from this clip)
+- evidence_timestamps_seconds (array of 1-3 numbers: timestamps where the clearest visible subjects appear; if no subject is clearly visible, return an empty array)
 - screenshot_reason (string: brief explanation of why that frame best represents the clip)
 
 Core evidence rules:
@@ -72,6 +73,24 @@ Reasoning order:
 2. If subjects are visible, count distinct visible subjects conservatively.
 3. Identify each animal only to the most specific level justified by visible evidence.
 4. Write the activity description conservatively and factually, describing uncertainty plainly rather than filling gaps.
+
+Return only the JSON object. No markdown fences, no explanation, no extra text."""
+
+FRAME_VERIFICATION_PROMPT = """You are verifying still frames extracted from a security camera clip.
+
+Return ONLY a valid JSON object with these fields:
+- persons (integer: number of distinct people clearly visible across the provided frames)
+- vehicles (integer: number of distinct vehicles clearly visible across the provided frames)
+- animals (integer: number of distinct animals clearly visible across the provided frames)
+- visible_subjects (array of short strings describing only subjects clearly visible in at least one frame)
+- frame_assessment (string: one sentence stating whether the frames show a clearly visible subject or only ambiguous/background motion)
+- confidence (string: one of "high", "medium", "low")
+
+Rules:
+- Count only subjects that are clearly visible in the provided frames.
+- Do not infer a subject from scene context, motion blur, shadows, water movement, foliage movement, or likely trigger causes.
+- If no clearly identifiable person, vehicle, or animal is visible in any frame, return persons=0, vehicles=0, animals=0 and state that no clearly visible subject is present.
+- Prefer a false negative over a false positive.
 
 Return only the JSON object. No markdown fences, no explanation, no extra text."""
 
@@ -156,7 +175,8 @@ def analyze_clip(client: genai.Client, path: Path) -> dict:
                         temperature=0,
                     ),
                 )
-                return parse_json_response(response, path.name)
+                result = parse_json_response(response, path.name)
+                return verify_clip_result(client, path, result)
             except Exception as e:
                 if attempt == GENERATE_RETRIES or not is_retryable_generate_error(e):
                     raise
@@ -239,6 +259,36 @@ def screenshot_filename(path: Path) -> str:
     return path.with_suffix(".jpg").name
 
 
+def temp_frame_path(clip: Path, index: int) -> Path:
+    return clip.with_suffix(f".verify{index}.jpg")
+
+
+def normalized_evidence_timestamps(result: dict, fallback_seconds: float) -> list[float]:
+    raw = result.get("evidence_timestamps_seconds")
+    timestamps = []
+    if isinstance(raw, list):
+        for value in raw:
+            try:
+                timestamps.append(float(value))
+            except (TypeError, ValueError):
+                continue
+
+    if not timestamps:
+        timestamps = [fallback_seconds]
+
+    deduped = []
+    seen = set()
+    for ts in timestamps:
+        rounded = round(ts, 2)
+        if rounded in seen:
+            continue
+        seen.add(rounded)
+        deduped.append(ts)
+        if len(deduped) == 3:
+            break
+    return deduped
+
+
 def extract_screenshot(clip: Path, timestamp_seconds: float, dest: Path) -> None:
     capture = cv2.VideoCapture(str(clip))
     if not capture.isOpened():
@@ -267,6 +317,87 @@ def extract_screenshot(clip: Path, timestamp_seconds: float, dest: Path) -> None
             raise RuntimeError(f"Could not write screenshot file: {dest}")
     finally:
         capture.release()
+
+
+def upload_files_and_wait(client: genai.Client, paths: list[Path]) -> list:
+    uploaded = []
+    for path in paths:
+        uploaded.append(upload_and_wait(client, path))
+    return uploaded
+
+
+def delete_uploaded_files(client: genai.Client, files: list) -> None:
+    for uploaded_file in files:
+        try:
+            client.files.delete(name=uploaded_file.name)
+        except Exception as e:
+            log.warning("Could not delete Gemini file %s: %s", uploaded_file.name, e)
+
+
+def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
+    claimed_subjects = sum(int(result.get(key, 0) or 0) for key in ("persons", "vehicles", "animals"))
+    claimed_animals = int(result.get("animals", 0) or 0)
+    if claimed_animals <= 0:
+        return result
+
+    screenshot_seconds = float(result.get("screenshot_timestamp_seconds", 0))
+    evidence_timestamps = normalized_evidence_timestamps(result, screenshot_seconds)
+
+    frame_paths = []
+    for index, timestamp in enumerate(evidence_timestamps, start=1):
+        frame_path = temp_frame_path(clip, index)
+        extract_screenshot(clip, timestamp, frame_path)
+        frame_paths.append(frame_path)
+
+    uploaded_frames = []
+    try:
+        uploaded_frames = upload_files_and_wait(client, frame_paths)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=uploaded_frames + [FRAME_VERIFICATION_PROMPT],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0,
+            ),
+        )
+        verification = parse_json_response(response, f"frame verification for {clip.name}")
+    finally:
+        if uploaded_frames:
+            delete_uploaded_files(client, uploaded_frames)
+        for frame_path in frame_paths:
+            frame_path.unlink(missing_ok=True)
+
+    verified_subjects = sum(
+        int(verification.get(key, 0) or 0) for key in ("persons", "vehicles", "animals")
+    )
+
+    if claimed_subjects > 0 and verified_subjects == 0:
+        result["persons"] = 0
+        result["vehicles"] = 0
+        result["animals"] = 0
+        result["activity"] = (
+            "No clearly identifiable person, vehicle, or animal is visible; the clip appears to show ambiguous or background motion."
+        )
+        result["notable_events"] = []
+        result["confidence"] = "low"
+        result["screenshot_reason"] = (
+            "Representative frame from the clip; verification found no clearly visible subject."
+        )
+        result["verification"] = {
+            "overrode_subject_claims": True,
+            "frame_assessment": verification.get("frame_assessment"),
+            "visible_subjects": verification.get("visible_subjects", []),
+            "confidence": verification.get("confidence"),
+        }
+    else:
+        result["verification"] = {
+            "overrode_subject_claims": False,
+            "frame_assessment": verification.get("frame_assessment"),
+            "visible_subjects": verification.get("visible_subjects", []),
+            "confidence": verification.get("confidence"),
+        }
+
+    return result
 
 
 def clip_needs_analysis(clip: Path) -> bool:
