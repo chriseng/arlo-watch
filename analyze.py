@@ -44,7 +44,7 @@ PROMPT = """Analyze this security camera clip and return ONLY a valid JSON objec
 - persons (integer: number of distinct people visible)
 - vehicles (integer: number of distinct vehicles visible)
 - animals (integer: number of distinct animals visible)
-- activity (string: one sentence describing what happens in the clip, up to a paragraph if necessary. use broad animal labels unless species-level evidence is visually clear)
+- activity (string: one sentence describing what happens in the clip, up to a paragraph if necessary. once an animal is clearly visible, prefer the most specific visually supported label, using qualifiers such as "likely" when needed)
 - notable_events (array of strings: specific actions, e.g. "person approached door")
 - motion_area (string: where primary motion occurs, e.g. "left", "center", "right", "full frame")
 - time_of_day (string: one of "day", "dusk", "night", "dawn")
@@ -61,17 +61,18 @@ Core evidence rules:
 - When evidence is weak, prefer "unknown animal", "indistinct person", or "no clearly identifiable subject visible" over a specific claim.
 
 Animal identification rules:
-- Try as hard as possible to identify bird species on visual traits in the clip. If confidence in identification is not strong, qualify with a label such as "likely".
-- Try to guess other species based on visible evidence, but if the animal cannot be identified with reasonable degree of confidence, use a broader label such as "small mammal", "cat", "dog", "deer", "raccoon-like animal", or "unknown animal".
+- First decide whether an animal is actually visible. Once an animal is clearly visible, try aggressively to identify bird species from visual traits in the clip.
+- If the species guess is plausible but not certain, prefer a qualified label such as "likely house finch", "likely robin", or "likely sparrow" instead of the generic word "bird".
+- Try to identify other animals as specifically as the visible evidence supports. If the animal cannot be identified with reasonable confidence, use a broader label such as "small mammal", "cat", "dog", "deer", "raccoon-like animal", or "unknown animal".
 - Base identification only on directly visible traits in the clip, such as size, silhouette, movement, tail shape, ear shape, wings, beak, markings, or antlers. Do not infer species from location, typical neighborhood wildlife, or prior probability.
 - Count only distinct animals that are actually visible. If repeated appearances may be the same animal, prefer the lower count unless multiple animals are clearly present at once.
-- In the activity field, mention animal species only when the visual evidence is strong. Otherwise use the broader label.
+- In the activity field, if an animal is clearly visible, prefer the most specific visually supported label. Use qualifiers like "likely" or "possibly" rather than falling back to a generic label too quickly.
 - Sometimes there will not be any animals in the video, especially when people are present. Be sure that animals are actually in the video before claiming that they are.
 
 Reasoning order:
 1. First decide whether any person, vehicle, or animal is clearly visible at all. If not, return zero counts and an empty-scene or ambiguous-motion description.
 2. If subjects are visible, count distinct visible subjects conservatively.
-3. Identify each animal only to the most specific level justified by visible evidence.
+3. If an animal is visible, identify it to the most specific visually supported level and use a qualified species guess when appropriate.
 4. Write the activity description conservatively and factually, describing uncertainty plainly rather than filling gaps.
 
 Return only the JSON object. No markdown fences, no explanation, no extra text."""
