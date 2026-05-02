@@ -82,12 +82,14 @@ Return ONLY a valid JSON object with these fields:
 - persons (integer: number of distinct people clearly visible across the provided frames)
 - vehicles (integer: number of distinct vehicles clearly visible across the provided frames)
 - animals (integer: number of distinct animals clearly visible across the provided frames)
+- animal_frames (array of strings: grid labels such as "A1" or "B3" where an animal is clearly visible; leave empty if none)
 - visible_subjects (array of short strings describing only subjects clearly visible in at least one frame)
 - frame_assessment (string: one sentence stating whether the frames show a clearly visible subject or only ambiguous/background motion)
 - confidence (string: one of "high", "medium", "low")
 
 Rules:
 - Count only subjects that are clearly visible in the provided frames.
+- Cite only grid cells where the subject itself is visible, not where you infer it from surrounding context.
 - Do not infer a subject from scene context, motion blur, shadows, water movement, foliage movement, or likely trigger causes.
 - If no clearly identifiable person, vehicle, or animal is visible in any frame, return persons=0, vehicles=0, animals=0 and state that no clearly visible subject is present.
 - Prefer a false negative over a false positive.
@@ -259,8 +261,8 @@ def screenshot_filename(path: Path) -> str:
     return path.with_suffix(".jpg").name
 
 
-def temp_frame_path(clip: Path, index: int) -> Path:
-    return clip.with_suffix(f".verify{index}.jpg")
+def verification_sheet_path(clip: Path) -> Path:
+    return clip.with_suffix(".verify-sheet.jpg")
 
 
 def normalized_evidence_timestamps(result: dict, fallback_seconds: float) -> list[float]:
@@ -285,6 +287,42 @@ def normalized_evidence_timestamps(result: dict, fallback_seconds: float) -> lis
         seen.add(rounded)
         deduped.append(ts)
         if len(deduped) == 3:
+            break
+    return deduped
+
+
+def clip_duration_seconds(clip: Path) -> float | None:
+    capture = cv2.VideoCapture(str(clip))
+    if not capture.isOpened():
+        raise RuntimeError(f"Could not open video for duration detection: {clip}")
+    try:
+        fps = capture.get(cv2.CAP_PROP_FPS) or 0
+        frame_count = capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        if fps > 0 and frame_count > 0:
+            return frame_count / fps
+        return None
+    finally:
+        capture.release()
+
+
+def build_verification_timestamps(clip: Path, result: dict) -> list[float]:
+    screenshot_seconds = float(result.get("screenshot_timestamp_seconds", 0))
+    timestamps = normalized_evidence_timestamps(result, screenshot_seconds)
+    duration_seconds = clip_duration_seconds(clip)
+    if duration_seconds and duration_seconds > 0:
+        sample_points = [0.1, 0.25, 0.4, 0.6, 0.75, 0.9]
+        for ratio in sample_points:
+            timestamps.append(duration_seconds * ratio)
+
+    deduped = []
+    seen = set()
+    for ts in timestamps:
+        rounded = round(max(ts, 0.0), 1)
+        if rounded in seen:
+            continue
+        seen.add(rounded)
+        deduped.append(rounded)
+        if len(deduped) == 9:
             break
     return deduped
 
@@ -319,6 +357,54 @@ def extract_screenshot(clip: Path, timestamp_seconds: float, dest: Path) -> None
         capture.release()
 
 
+def build_verification_sheet(clip: Path, timestamps: list[float], dest: Path) -> None:
+    capture = cv2.VideoCapture(str(clip))
+    if not capture.isOpened():
+        raise RuntimeError(f"Could not open video for verification sheet: {clip}")
+
+    labels = [
+        "A1", "A2", "A3",
+        "B1", "B2", "B3",
+        "C1", "C2", "C3",
+    ]
+    frames = []
+    try:
+        for index, seconds in enumerate(timestamps):
+            capture.set(cv2.CAP_PROP_POS_MSEC, float(seconds) * 1000)
+            ok, frame = capture.read()
+            if not ok:
+                continue
+            tile = cv2.resize(frame, (480, 270))
+            label = labels[index] if index < len(labels) else f"F{index + 1}"
+            cv2.rectangle(tile, (0, 0), (220, 42), (0, 0, 0), -1)
+            cv2.putText(
+                tile,
+                f"{label}  {seconds:.1f}s",
+                (12, 28),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            frames.append(tile)
+    finally:
+        capture.release()
+
+    if not frames:
+        raise RuntimeError(f"Could not extract any frames for verification sheet: {clip.name}")
+
+    while len(frames) < 9:
+        frames.append(frames[-1].copy())
+
+    rows = []
+    for row_index in range(0, 9, 3):
+        rows.append(cv2.hconcat(frames[row_index:row_index + 3]))
+    sheet = cv2.vconcat(rows)
+    if not cv2.imwrite(str(dest), sheet):
+        raise RuntimeError(f"Could not write verification sheet: {dest}")
+
+
 def upload_files_and_wait(client: genai.Client, paths: list[Path]) -> list:
     uploaded = []
     for path in paths:
@@ -340,18 +426,13 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
     if claimed_animals <= 0:
         return result
 
-    screenshot_seconds = float(result.get("screenshot_timestamp_seconds", 0))
-    evidence_timestamps = normalized_evidence_timestamps(result, screenshot_seconds)
-
-    frame_paths = []
-    for index, timestamp in enumerate(evidence_timestamps, start=1):
-        frame_path = temp_frame_path(clip, index)
-        extract_screenshot(clip, timestamp, frame_path)
-        frame_paths.append(frame_path)
+    timestamps = build_verification_timestamps(clip, result)
+    sheet_path = verification_sheet_path(clip)
+    build_verification_sheet(clip, timestamps, sheet_path)
 
     uploaded_frames = []
     try:
-        uploaded_frames = upload_files_and_wait(client, frame_paths)
+        uploaded_frames = upload_files_and_wait(client, [sheet_path])
         response = client.models.generate_content(
             model=GEMINI_MODEL,
             contents=uploaded_frames + [FRAME_VERIFICATION_PROMPT],
@@ -364,14 +445,16 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
     finally:
         if uploaded_frames:
             delete_uploaded_files(client, uploaded_frames)
-        for frame_path in frame_paths:
-            frame_path.unlink(missing_ok=True)
+        sheet_path.unlink(missing_ok=True)
 
     verified_subjects = sum(
         int(verification.get(key, 0) or 0) for key in ("persons", "vehicles", "animals")
     )
+    animal_frames = verification.get("animal_frames", [])
+    verified_animals = int(verification.get("animals", 0) or 0)
+    verified_animals_reliable = verified_animals > 0 and isinstance(animal_frames, list) and len(animal_frames) >= 1
 
-    if claimed_subjects > 0 and verified_subjects == 0:
+    if claimed_subjects > 0 and (verified_subjects == 0 or not verified_animals_reliable):
         result["persons"] = 0
         result["vehicles"] = 0
         result["animals"] = 0
@@ -386,6 +469,7 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
         result["verification"] = {
             "overrode_subject_claims": True,
             "frame_assessment": verification.get("frame_assessment"),
+            "animal_frames": animal_frames,
             "visible_subjects": verification.get("visible_subjects", []),
             "confidence": verification.get("confidence"),
         }
@@ -393,6 +477,7 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
         result["verification"] = {
             "overrode_subject_claims": False,
             "frame_assessment": verification.get("frame_assessment"),
+            "animal_frames": animal_frames,
             "visible_subjects": verification.get("visible_subjects", []),
             "confidence": verification.get("confidence"),
         }
