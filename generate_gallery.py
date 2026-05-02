@@ -298,6 +298,7 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
     .day-summary ul {{
       margin: 0;
       padding-left: 20px;
+      line-height: 1.55;
     }}
     .rows {{
       display: grid;
