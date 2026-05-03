@@ -404,6 +404,12 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
       margin: 0;
       line-height: 1.55;
     }}
+    .verification-note {{
+      margin-top: 20px;
+    }}
+    .verification-note p {{
+      margin-top: 10px;
+    }}
     .events {{
       margin: 0;
       padding-left: 18px;
@@ -524,8 +530,10 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
         const verificationNote = buildVerificationNote(entry);
         const verificationSection = verificationNote
           ? `
-              <h3>${{escapeHtml(verificationNote.title)}}</h3>
-              <p class="activity">${{escapeHtml(verificationNote.body)}}</p>
+              <div class="verification-note">
+                <h3>${{escapeHtml(verificationNote.title)}}</h3>
+                <p class="activity">${{escapeHtml(verificationNote.body)}}</p>
+              </div>
           `
           : '';
         const duration = entry.duration_seconds != null ? ` (${{entry.duration_seconds}}s)` : '';
