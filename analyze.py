@@ -461,19 +461,8 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
     verified_animals_reliable = verified_animals > 0 and isinstance(animal_frames, list) and len(animal_frames) >= 1
 
     if claimed_subjects > 0 and (verified_subjects == 0 or not verified_animals_reliable):
-        result["persons"] = 0
-        result["vehicles"] = 0
-        result["animals"] = 0
-        result["activity"] = (
-            "No clearly identifiable person, vehicle, or animal is visible; the clip appears to show ambiguous or background motion."
-        )
-        result["notable_events"] = []
-        result["confidence"] = "low"
-        result["screenshot_reason"] = (
-            "Representative frame from the clip; verification found no clearly visible subject."
-        )
         result["verification"] = {
-            "overrode_subject_claims": True,
+            "presence_conflict": True,
             "frame_assessment": verification.get("frame_assessment"),
             "animal_frames": animal_frames,
             "visible_subjects": verification.get("visible_subjects", []),
@@ -481,7 +470,7 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
         }
     else:
         result["verification"] = {
-            "overrode_subject_claims": False,
+            "presence_conflict": False,
             "frame_assessment": verification.get("frame_assessment"),
             "animal_frames": animal_frames,
             "visible_subjects": verification.get("visible_subjects", []),

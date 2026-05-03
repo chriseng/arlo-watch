@@ -548,9 +548,14 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
     function buildDisplayEvents(entry) {{
       const events = Array.isArray(entry.json.notable_events) ? [...entry.json.notable_events] : [];
       const verification = entry.json.verification;
-      if (!verification || verification.overrode_subject_claims) return events;
+      if (!verification) return events;
 
       const frameAssessment = typeof verification.frame_assessment === 'string' ? verification.frame_assessment.trim() : '';
+      if (verification.presence_conflict) {{
+        events.push(frameAssessment ? `Verification warning: ${{frameAssessment}}` : 'Verification warning: No clearly visible subject was confirmed in the sampled frames.');
+        return events;
+      }}
+
       const visibleSubjects = Array.isArray(verification.visible_subjects) ? verification.visible_subjects : [];
       const activity = String(entry.json.activity || '').toLowerCase();
       if (!frameAssessment || visibleSubjects.length !== 1) return events;

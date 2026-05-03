@@ -6,7 +6,7 @@ Downloads clips from a specific Arlo camera and generates AI-powered JSON summar
 
 1. `download.py` — authenticates to Arlo, fetches the library for the target camera, downloads any clips not already on disk.
 2. `analyze.py` — for each `.mp4` without a matching `.json`, uploads the clip to Gemini, performs clip analysis, optionally runs a second animal-verification pass, and writes a JSON summary file alongside it.
-3. `generate_gallery.py` — reads the clip summaries and screenshots and builds the static gallery in `html/`.
+3. `generate_gallery.py` — reads the clip summaries and screenshots, highlights verification disagreements in the rendered notable-events list, and builds the static gallery in `html/`.
 4. `run.sh` — runs the full download, cleanup, analysis, and gallery-generation sequence; invoke this from cron.
 
 Clips accumulate in `html/clips/`. Each clip gets a companion JSON file, e.g.:
@@ -36,7 +36,7 @@ Example JSON output:
   "screenshot_reason": "The bird is most visible in this frame.",
   "screenshot_file": "20240115_143022_UTC.jpg",
   "verification": {
-    "overrode_subject_claims": false,
+    "presence_conflict": false,
     "frame_assessment": "The contact sheet shows a clearly visible bird in multiple frames.",
     "animal_frames": ["A2", "B2"],
     "visible_subjects": ["house finch"],
@@ -64,12 +64,21 @@ Animal summaries use a two-stage flow:
 1. Gemini analyzes the uploaded video clip and produces the normal JSON summary, including the representative screenshot timestamp and 1-3 evidence timestamps.
 2. If and only if the first pass reports `animals > 0`, `analyze.py` builds a labeled 3x3 contact sheet from sampled frames across the clip and sends that sheet to Gemini for verification.
 3. The verification pass must point to specific grid cells such as `A2` or `B3` in `verification.animal_frames` where an animal is actually visible.
-4. If verification cannot confirm an animal in the still frames, the script overrides the original animal claim and rewrites the summary to an ambiguous/background-motion result.
+4. If verification cannot confirm an animal in the still frames, the original summary is preserved and `verification.presence_conflict` is set to `true`.
+5. If verification does confirm an animal, the original `activity`, `notable_events`, and `screenshot_reason` are still preserved. The verification result is stored separately in the `verification` object as a second opinion rather than rewriting the saved analysis text.
 
 This is deliberately asymmetric:
 
 - Strict: "Is there actually an animal here?"
 - Looser: "If there is an animal here, what species is it most likely to be?"
+
+### Conflict display
+
+`generate_gallery.py` does not rewrite saved clip JSON when the main summary and verification disagree about the animal label. Instead, it surfaces the disagreement at render time:
+
+- If `verification.presence_conflict` is `true`, the gallery appends a `Verification warning: ...` line to the rendered notable-events list using `verification.frame_assessment`.
+- If verification reports one clear `visible_subjects` label and that label does not appear in the main `activity` text, the gallery appends an `Alternate analysis: ...` line to the rendered notable-events list using `verification.frame_assessment`.
+- Older JSON files that have no `verification` object still render normally.
 
 ### Gemini call implications
 
@@ -162,7 +171,7 @@ If the session expires and you're running unattended via cron, see **Unattended 
 bash run.sh
 ```
 
-Check `html/clips/` for downloaded `.mp4`, `.jpg`, and `.json` files, and `arlo_watch.log` for output. For animal clips, inspect the `verification` object in the generated JSON if you need to understand why a wildlife claim was kept or overridden.
+Check `html/clips/` for downloaded `.mp4`, `.jpg`, and `.json` files, and `arlo_watch.log` for output. For animal clips, inspect the `verification` object in the generated JSON. If the gallery shows an `Alternate analysis:` event, that note is coming from `verification.frame_assessment` rather than from a rewritten clip summary.
 
 ### 6. Schedule with cron
 
