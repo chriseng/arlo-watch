@@ -579,10 +579,15 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
 
       const visibleSubjects = Array.isArray(verification.visible_subjects) ? verification.visible_subjects : [];
       const activity = String(entry.json.activity || '').toLowerCase();
-      if (!frameAssessment || visibleSubjects.length !== 1) return null;
+      if (!frameAssessment || visibleSubjects.length === 0) return null;
 
-      const verifiedLabel = String(visibleSubjects[0] || '').trim().toLowerCase();
-      if (!verifiedLabel || activity.includes(verifiedLabel)) return null;
+      const normalizedSubjects = visibleSubjects
+        .map((subject) => String(subject || '').trim().toLowerCase())
+        .filter(Boolean);
+      if (!normalizedSubjects.length) return null;
+
+      const missingSubjects = normalizedSubjects.filter((subject) => !activity.includes(subject));
+      if (!missingSubjects.length) return null;
 
       return {{
         title: 'Alternate Analysis',

@@ -87,7 +87,7 @@ This is deliberately asymmetric:
 `generate_gallery.py` does not rewrite saved clip JSON when the main summary and verification disagree about the animal label. Instead, it surfaces the disagreement at render time:
 
 - If `verification.presence_conflict` is `true`, the gallery appends a `Hallucination warning: ...` line to the rendered notable-events list using `verification.frame_assessment`.
-- If verification reports one clear `visible_subjects` label and that label does not appear in the main `activity` text, the gallery appends an `Alternate analysis: ...` line to the rendered notable-events list using `verification.frame_assessment`.
+- If verification reports any clear `visible_subjects` label that does not appear in the main `activity` text, the gallery appends an `Alternate analysis: ...` line to the rendered notable-events list using `verification.frame_assessment`.
 - New clip JSON stores verified grid labels in `verification.activity_sample_frames`, the timestamps for those cited labels in `verification.activity_sample_frame_timestamps_seconds`, and the full wide-plus-zoom verification sampling map in `verification.verification_sample_timestamps_seconds`.
 - Older JSON files that have no `verification` object still render normally.
 
