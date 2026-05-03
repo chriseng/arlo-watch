@@ -90,7 +90,7 @@ Return ONLY a valid JSON object with these fields:
 - vehicles (integer: number of distinct vehicles clearly visible across the provided frames)
 - animals (integer: number of distinct animals clearly visible across the provided frames)
 - activity_sample_frames (array of strings: grid labels such as "A1", "B3", "D2", or "F1" where a clearly visible subject appears; leave empty if none)
-- visible_subjects (array of short strings describing only subjects clearly visible in at least one frame)
+- visible_subjects (array of short strings naming only subjects clearly visible in at least one frame; for animals, use the most specific visually supported label, including species when the frames support it)
 - frame_assessment (string: one sentence stating whether the frames show a clearly visible subject or only ambiguous/background motion)
 - confidence (string: one of "high", "medium", "low")
 
@@ -98,6 +98,7 @@ Rules:
 - Count only subjects that are clearly visible in the provided frames.
 - Cite only grid cells where the subject itself is visible, not where you infer it from surrounding context.
 - Do not infer a subject from scene context, motion blur, shadows, water movement, foliage movement, or likely trigger causes.
+- If an animal is clearly visible, identify it to the most specific visually supported level in `visible_subjects`. Use species names when the frames support them, especially for birds. Use qualified or broader labels such as "likely sparrow", "small rabbit", or "unknown mammal" when the frames do not support a confident species-level ID.
 - If no clearly identifiable person, vehicle, or animal is visible in any frame, return persons=0, vehicles=0, animals=0 and state that no clearly visible subject is present.
 - Prefer a false negative over a false positive.
 

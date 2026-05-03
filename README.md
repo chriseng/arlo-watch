@@ -66,8 +66,9 @@ Animal summaries use a two-stage flow:
 1. Gemini analyzes the uploaded video clip and produces the normal JSON summary, including the representative screenshot timestamp and 1-3 evidence timestamps.
 2. If and only if the first pass reports `animals > 0`, `analyze.py` builds two labeled 3x3 contact sheets from the same sampled timestamps and sends both images to Gemini in a single verification request: a full-scene sheet and a zoomed-in sheet. Each tile is `960x540`, so each verification image is `2880x1620`.
 3. The verification pass may point to specific grid cells such as `A2`, `B3`, `D2`, or `F1` in `verification.activity_sample_frames`, where `A1`-`C3` come from the wide sheet and `D1`-`F3` come from the zoomed sheet. The saved JSON also records those frame timestamps in `verification.activity_sample_frame_timestamps_seconds` and records the full sampling map in `verification.verification_sample_timestamps_seconds`.
-4. If verification cannot confirm an animal in the still frames, the original summary is preserved and `verification.presence_conflict` is set to `true`.
-5. If verification does confirm an animal, the original `activity`, `notable_events`, and `screenshot_reason` are still preserved. The verification result is stored separately in the `verification` object as a second opinion rather than rewriting the saved analysis text.
+4. The verification pass also tries to identify animals to the most specific visually supported level in `verification.visible_subjects`, including species names when the still frames support them, especially for birds.
+5. If verification cannot confirm an animal in the still frames, the original summary is preserved and `verification.presence_conflict` is set to `true`.
+6. If verification does confirm an animal, the original `activity`, `notable_events`, and `screenshot_reason` are still preserved. The verification result is stored separately in the `verification` object as a second opinion rather than rewriting the saved analysis text.
 
 Verification sampling is evidence-centered:
 
