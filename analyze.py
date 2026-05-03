@@ -426,115 +426,6 @@ def delete_uploaded_files(client: genai.Client, files: list) -> None:
             log.warning("Could not delete Gemini file %s: %s", uploaded_file.name, e)
 
 
-def article_for(label: str) -> str:
-    return "an" if label[:1].lower() in {"a", "e", "i", "o", "u"} else "a"
-
-
-def substitute_verified_animal_label(text: str, verified_label: str) -> str:
-    if not text or not verified_label:
-        return text
-
-    label = verified_label.strip()
-    if not label:
-        return text
-
-    lower_text = text.lower()
-    lower_label = label.lower()
-    if lower_label in lower_text:
-        return text
-
-    subject_patterns = [
-        (
-            re.compile(
-                r"^(?P<prefix>A|An)\s+(?P<subject>.+?)(?=\s+(?:is|are|was|were|walks|walk|runs|run|hops|hop|drinks|drink|approaches|approach|stands|stand|moves|move|perches|perch|splashes|splash|enters|enter|exits|exit|flies|fly|trots|trot|waddles|waddle|climbs|climb|crosses|cross|appears|appear|heads|head)\b)",
-                re.IGNORECASE,
-            ),
-            lambda: f"{article_for(label)} {label}",
-        ),
-        (
-            re.compile(
-                r"^(?P<prefix>The)\s+(?P<subject>.+?)(?=\s+(?:is|are|was|were|walks|walk|runs|run|hops|hop|drinks|drink|approaches|approach|stands|stand|moves|move|perches|perch|splashes|splash|enters|enter|exits|exit|flies|fly|trots|trot|waddles|waddle|climbs|climb|crosses|cross|appears|appear|heads|head)\b)",
-                re.IGNORECASE,
-            ),
-            lambda: f"the {label}",
-        ),
-    ]
-
-    for pattern, replacement_factory in subject_patterns:
-        match = pattern.search(text)
-        if not match:
-            continue
-        replacement = replacement_factory()
-        if match.group("prefix")[0].isupper():
-            replacement = replacement[0].upper() + replacement[1:]
-        return text[: match.start()] + pattern.sub(replacement, text, count=1)
-
-    return text
-
-
-def uses_broad_or_uncertain_animal_label(text: str) -> bool:
-    lowered = text.lower()
-    uncertainty_markers = [
-        "likely",
-        "possibly",
-        "probably",
-        "maybe",
-        "-like",
-        "unknown",
-    ]
-    broad_labels = [
-        " animal",
-        " mammal",
-        " bird",
-    ]
-    return any(marker in lowered for marker in uncertainty_markers) or any(
-        label in lowered for label in broad_labels
-    )
-
-
-def reconcile_verified_animal_label(result: dict, verification: dict) -> dict:
-    rewrite_info = {
-        "applied": False,
-        "verified_label": None,
-        "activity_rewritten": False,
-        "screenshot_reason_rewritten": False,
-    }
-
-    if str(verification.get("confidence", "")).lower() != "high":
-        return rewrite_info
-
-    visible_subjects = verification.get("visible_subjects")
-    if not isinstance(visible_subjects, list) or len(visible_subjects) != 1:
-        return rewrite_info
-
-    verified_label = str(visible_subjects[0]).strip()
-    if not verified_label:
-        return rewrite_info
-
-    rewrite_info["verified_label"] = verified_label
-
-    activity = str(result.get("activity", ""))
-    screenshot_reason = str(result.get("screenshot_reason", ""))
-
-    if not uses_broad_or_uncertain_animal_label(activity):
-        rewritten_activity = substitute_verified_animal_label(activity, verified_label)
-        if rewritten_activity != activity:
-            result["activity"] = rewritten_activity
-            rewrite_info["applied"] = True
-            rewrite_info["activity_rewritten"] = True
-    if not uses_broad_or_uncertain_animal_label(screenshot_reason):
-        rewritten_reason = substitute_verified_animal_label(
-            screenshot_reason,
-            verified_label,
-        )
-        if rewritten_reason != screenshot_reason:
-            result["screenshot_reason"] = rewritten_reason
-            rewrite_info["applied"] = True
-            rewrite_info["screenshot_reason_rewritten"] = True
-
-    return rewrite_info
-
-
 def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
     claimed_subjects = sum(int(result.get(key, 0) or 0) for key in ("persons", "vehicles", "animals"))
     claimed_animals = int(result.get("animals", 0) or 0)
@@ -587,22 +478,14 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
             "animal_frames": animal_frames,
             "visible_subjects": verification.get("visible_subjects", []),
             "confidence": verification.get("confidence"),
-            "label_rewrite": {
-                "applied": False,
-                "verified_label": None,
-                "activity_rewritten": False,
-                "screenshot_reason_rewritten": False,
-            },
         }
     else:
-        rewrite_info = reconcile_verified_animal_label(result, verification)
         result["verification"] = {
             "overrode_subject_claims": False,
             "frame_assessment": verification.get("frame_assessment"),
             "animal_frames": animal_frames,
             "visible_subjects": verification.get("visible_subjects", []),
             "confidence": verification.get("confidence"),
-            "label_rewrite": rewrite_info,
         }
 
     return result

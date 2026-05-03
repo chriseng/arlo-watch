@@ -520,7 +520,7 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
 
     function buildRowsHtml(filtered) {{
       return filtered.map((entry) => {{
-        const events = Array.isArray(entry.json.notable_events) ? entry.json.notable_events : [];
+        const events = buildDisplayEvents(entry);
         const duration = entry.duration_seconds != null ? ` (${{entry.duration_seconds}}s)` : '';
         return `
           <article class="row">
@@ -543,6 +543,23 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
           </article>
         `;
       }}).join('');
+    }}
+
+    function buildDisplayEvents(entry) {{
+      const events = Array.isArray(entry.json.notable_events) ? [...entry.json.notable_events] : [];
+      const verification = entry.json.verification;
+      if (!verification || verification.overrode_subject_claims) return events;
+
+      const frameAssessment = typeof verification.frame_assessment === 'string' ? verification.frame_assessment.trim() : '';
+      const visibleSubjects = Array.isArray(verification.visible_subjects) ? verification.visible_subjects : [];
+      const activity = String(entry.json.activity || '').toLowerCase();
+      if (!frameAssessment || visibleSubjects.length !== 1) return events;
+
+      const verifiedLabel = String(visibleSubjects[0] || '').trim().toLowerCase();
+      if (!verifiedLabel || activity.includes(verifiedLabel)) return events;
+
+      events.push(`Alternate analysis: ${frameAssessment}`);
+      return events;
     }}
 
     function hydrateVideo(button) {{
