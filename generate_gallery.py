@@ -558,7 +558,7 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
       const verifiedLabel = String(visibleSubjects[0] || '').trim().toLowerCase();
       if (!verifiedLabel || activity.includes(verifiedLabel)) return events;
 
-      events.push(`Alternate analysis: ${frameAssessment}`);
+      events.push(`Alternate analysis: ${{frameAssessment}}`);
       return events;
     }}
 
