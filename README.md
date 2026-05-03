@@ -2,7 +2,7 @@
 
 Downloads clips from a specific Arlo camera and generates AI-powered JSON summaries using the Gemini API. AI prompt is geared towards outdoor wildlife, so it may need tweaking for different use cases.
 
-![arlo-watch screenshot](https://raw.githubusercontent.com/chriseng/arlo-watch/refs/heads/master/Screenshot.png)
+![arlo-watch screenshot](https://raw.githubusercontent.com/chriseng/arlo-watch/refs/heads/main/Screenshot.png)
 
 ## How it works
 
