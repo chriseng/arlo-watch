@@ -40,7 +40,6 @@ Example JSON output:
     "frame_assessment": "The contact sheet shows a clearly visible bird in multiple frames.",
     "activity_sample_frames": ["A2", "B2"],
     "activity_sample_frame_timestamps_seconds": {"A2": 12.0, "B2": 12.4},
-    "animal_frames": ["A2", "B2"],
     "visible_subjects": ["house finch"],
     "confidence": "medium"
   },
@@ -64,10 +63,18 @@ All activity is logged to `arlo_watch.log` and stdout.
 Animal summaries use a two-stage flow:
 
 1. Gemini analyzes the uploaded video clip and produces the normal JSON summary, including the representative screenshot timestamp and 1-3 evidence timestamps.
-2. If and only if the first pass reports `animals > 0`, `analyze.py` builds a labeled 3x3 contact sheet from sampled frames across the clip and sends that sheet to Gemini for verification.
+2. If and only if the first pass reports `animals > 0`, `analyze.py` builds a labeled 3x3 contact sheet from sampled frames across the clip and sends that sheet to Gemini for verification. The contact sheet now uses larger `640x360` tiles, producing a `1920x1080` verification image for better detail.
 3. The verification pass must point to specific grid cells such as `A2` or `B3` in `verification.activity_sample_frames` where a clearly visible subject appears. The saved JSON also records those frame timestamps in `verification.activity_sample_frame_timestamps_seconds`.
 4. If verification cannot confirm an animal in the still frames, the original summary is preserved and `verification.presence_conflict` is set to `true`.
 5. If verification does confirm an animal, the original `activity`, `notable_events`, and `screenshot_reason` are still preserved. The verification result is stored separately in the `verification` object as a second opinion rather than rewriting the saved analysis text.
+
+Verification sampling is evidence-centered:
+
+- If the main analysis returns 3 evidence timestamps, verification samples `t-0.4`, `t`, and `t+0.4` around each one.
+- If it returns 2 evidence timestamps, verification samples `t-0.6`, `t-0.2`, `t+0.2`, and `t+0.6` around each one, then fills the remaining 2 slots with broad clip coverage.
+- If it returns 1 evidence timestamp, verification uses a dense 9-frame burst centered on that point.
+- If it returns 0 evidence timestamps, verification falls back to 9 whole-clip coverage samples.
+- When early negative offsets collapse into duplicate `0.0` frames after de-duplication, lower-priority forward offsets are used to refill those lost slots before falling back to broader coverage.
 
 This is deliberately asymmetric:
 
@@ -80,7 +87,7 @@ This is deliberately asymmetric:
 
 - If `verification.presence_conflict` is `true`, the gallery appends a `Hallucination warning: ...` line to the rendered notable-events list using `verification.frame_assessment`.
 - If verification reports one clear `visible_subjects` label and that label does not appear in the main `activity` text, the gallery appends an `Alternate analysis: ...` line to the rendered notable-events list using `verification.frame_assessment`.
-- New clip JSON stores verified grid labels in `verification.activity_sample_frames` and their timestamps in `verification.activity_sample_frame_timestamps_seconds`. `verification.animal_frames` is still written as a compatibility alias.
+- New clip JSON stores verified grid labels in `verification.activity_sample_frames` and their timestamps in `verification.activity_sample_frame_timestamps_seconds`.
 - Older JSON files that have no `verification` object still render normally.
 
 ### Gemini call implications

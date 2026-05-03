@@ -541,7 +541,6 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
             "frame_assessment": verification.get("frame_assessment"),
             "activity_sample_frames": activity_sample_frames,
             "activity_sample_frame_timestamps_seconds": sample_frame_timestamps,
-            "animal_frames": activity_sample_frames,
             "visible_subjects": verification.get("visible_subjects", []),
             "confidence": verification.get("confidence"),
         }
@@ -551,7 +550,6 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
             "frame_assessment": verification.get("frame_assessment"),
             "activity_sample_frames": activity_sample_frames,
             "activity_sample_frame_timestamps_seconds": sample_frame_timestamps,
-            "animal_frames": activity_sample_frames,
             "visible_subjects": verification.get("visible_subjects", []),
             "confidence": verification.get("confidence"),
         }
