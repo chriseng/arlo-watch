@@ -572,7 +572,7 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
       const frameAssessment = typeof verification.frame_assessment === 'string' ? verification.frame_assessment.trim() : '';
       if (verification.presence_conflict) {{
         return {{
-          title: 'Verification Warning',
+          title: 'Hallucination Warning',
           body: frameAssessment || 'No clearly visible subject was confirmed in the sampled frames.',
         }};
       }}
