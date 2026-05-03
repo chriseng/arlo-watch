@@ -524,10 +524,8 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
         const verificationNote = buildVerificationNote(entry);
         const verificationSection = verificationNote
           ? `
-            <section class="cell">
               <h3>${{escapeHtml(verificationNote.title)}}</h3>
               <p class="activity">${{escapeHtml(verificationNote.body)}}</p>
-            </section>
           `
           : '';
         const duration = entry.duration_seconds != null ? ` (${{entry.duration_seconds}}s)` : '';
@@ -544,8 +542,8 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
             <section class="cell">
               <h3>Activity</h3>
               <p class="activity">${{escapeHtml(entry.json.activity || '')}}</p>
+              ${{verificationSection}}
             </section>
-            ${{verificationSection}}
             <section class="cell">
               <h3>Notable Events</h3>
               ${{events.length ? `<ul class="events">${{events.map((item) => `<li>${{escapeHtml(item)}}</li>`).join('')}}</ul>` : '<p class="activity">None recorded.</p>'}}
