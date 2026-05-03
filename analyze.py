@@ -83,12 +83,13 @@ Reasoning order:
 Return only the JSON object. No markdown fences, no explanation, no extra text."""
 
 FRAME_VERIFICATION_PROMPT = """You are verifying still frames extracted from a security camera clip.
+You may receive multiple labeled contact sheets for the same clip, including a full-scene sheet and a zoomed-in sheet using the same timestamps.
 
 Return ONLY a valid JSON object with these fields:
 - persons (integer: number of distinct people clearly visible across the provided frames)
 - vehicles (integer: number of distinct vehicles clearly visible across the provided frames)
 - animals (integer: number of distinct animals clearly visible across the provided frames)
-- activity_sample_frames (array of strings: grid labels such as "A1" or "B3" where a clearly visible subject appears; leave empty if none)
+- activity_sample_frames (array of strings: grid labels such as "A1", "B3", "D2", or "F1" where a clearly visible subject appears; leave empty if none)
 - visible_subjects (array of short strings describing only subjects clearly visible in at least one frame)
 - frame_assessment (string: one sentence stating whether the frames show a clearly visible subject or only ambiguous/background motion)
 - confidence (string: one of "high", "medium", "low")
@@ -267,8 +268,8 @@ def screenshot_filename(path: Path) -> str:
     return path.with_suffix(".jpg").name
 
 
-def verification_sheet_path(clip: Path) -> Path:
-    return clip.with_suffix(".verify-sheet.jpg")
+def verification_sheet_path(clip: Path, variant: str = "wide") -> Path:
+    return clip.with_suffix(f".verify-{variant}-sheet.jpg")
 
 
 def normalized_evidence_timestamps(result: dict, fallback_seconds: float) -> list[float]:
@@ -407,20 +408,50 @@ def extract_screenshot(clip: Path, timestamp_seconds: float, dest: Path) -> None
         capture.release()
 
 
-def build_verification_sheet(clip: Path, timestamps: list[float], dest: Path) -> None:
+def crop_verification_focus(frame, motion_area: str) -> any:
+    height, width = frame.shape[:2]
+    crop_width = max(int(width * 0.5), 1)
+    crop_height = max(int(height * 0.5), 1)
+
+    area = motion_area.strip().lower()
+    center_x = width // 2
+    center_y = height // 2
+
+    if "left" in area:
+        center_x = width // 4
+    elif "right" in area:
+        center_x = (width * 3) // 4
+
+    if "top" in area or "upper" in area:
+        center_y = height // 4
+    elif "bottom" in area or "lower" in area:
+        center_y = (height * 3) // 4
+
+    half_width = crop_width // 2
+    half_height = crop_height // 2
+    start_x = min(max(center_x - half_width, 0), max(width - crop_width, 0))
+    start_y = min(max(center_y - half_height, 0), max(height - crop_height, 0))
+    end_x = min(start_x + crop_width, width)
+    end_y = min(start_y + crop_height, height)
+    return frame[start_y:end_y, start_x:end_x]
+
+
+def build_verification_sheet(
+    clip: Path,
+    timestamps: list[float],
+    dest: Path,
+    labels: list[str],
+    zoomed: bool = False,
+    motion_area: str = "",
+) -> None:
     capture = cv2.VideoCapture(str(clip))
     if not capture.isOpened():
         raise RuntimeError(f"Could not open video for verification sheet: {clip}")
 
-    labels = [
-        "A1", "A2", "A3",
-        "B1", "B2", "B3",
-        "C1", "C2", "C3",
-    ]
-    tile_width = 640
-    tile_height = 360
-    label_width = 260
-    label_height = 52
+    tile_width = 960
+    tile_height = 540
+    label_width = 320
+    label_height = 64
     frames = []
     try:
         for index, seconds in enumerate(timestamps):
@@ -428,17 +459,19 @@ def build_verification_sheet(clip: Path, timestamps: list[float], dest: Path) ->
             ok, frame = capture.read()
             if not ok:
                 continue
+            if zoomed:
+                frame = crop_verification_focus(frame, motion_area)
             tile = cv2.resize(frame, (tile_width, tile_height))
             label = labels[index] if index < len(labels) else f"F{index + 1}"
             cv2.rectangle(tile, (0, 0), (label_width, label_height), (0, 0, 0), -1)
             cv2.putText(
                 tile,
                 f"{label}  {seconds:.1f}s",
-                (14, 34),
+                (18, 42),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                1.0,
+                1.25,
                 (255, 255, 255),
-                2,
+                3,
                 cv2.LINE_AA,
             )
             frames.append(tile)
@@ -467,11 +500,19 @@ def verification_frame_labels() -> list[str]:
     ]
 
 
+def verification_zoom_frame_labels() -> list[str]:
+    return [
+        "D1", "D2", "D3",
+        "E1", "E2", "E3",
+        "F1", "F2", "F3",
+    ]
+
+
 def verification_label_timestamps(timestamps: list[float]) -> dict[str, float]:
-    labels = verification_frame_labels()
+    labels = verification_frame_labels() + verification_zoom_frame_labels()
     return {
-        labels[index]: round(float(timestamp), 1)
-        for index, timestamp in enumerate(timestamps[:len(labels)])
+        label: round(float(timestamp), 1)
+        for label, timestamp in zip(labels, timestamps + timestamps)
     }
 
 
@@ -498,12 +539,27 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
 
     timestamps = build_verification_timestamps(clip, result)
     label_timestamps = verification_label_timestamps(timestamps)
-    sheet_path = verification_sheet_path(clip)
-    build_verification_sheet(clip, timestamps, sheet_path)
+    motion_area = str(result.get("motion_area", "") or "")
+    wide_sheet_path = verification_sheet_path(clip, "wide")
+    zoom_sheet_path = verification_sheet_path(clip, "zoom")
+    build_verification_sheet(
+        clip,
+        timestamps,
+        wide_sheet_path,
+        verification_frame_labels(),
+    )
+    build_verification_sheet(
+        clip,
+        timestamps,
+        zoom_sheet_path,
+        verification_zoom_frame_labels(),
+        zoomed=True,
+        motion_area=motion_area,
+    )
 
     uploaded_frames = []
     try:
-        uploaded_frames = upload_files_and_wait(client, [sheet_path])
+        uploaded_frames = upload_files_and_wait(client, [wide_sheet_path, zoom_sheet_path])
         response = client.models.generate_content(
             model=GEMINI_MODEL,
             contents=uploaded_frames + [FRAME_VERIFICATION_PROMPT],
@@ -516,7 +572,8 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
     finally:
         if uploaded_frames:
             delete_uploaded_files(client, uploaded_frames)
-        sheet_path.unlink(missing_ok=True)
+        wide_sheet_path.unlink(missing_ok=True)
+        zoom_sheet_path.unlink(missing_ok=True)
 
     verified_subjects = sum(
         int(verification.get(key, 0) or 0) for key in ("persons", "vehicles", "animals")
