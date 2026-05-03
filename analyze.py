@@ -66,6 +66,8 @@ Animal identification rules:
 - Use qualifiers such as "likely" or "possibly" only when there are multiple plausible species and the clip does not clearly distinguish between them.
 - Try to identify other animals as specifically as the visible evidence supports. If the animal cannot be identified with reasonable confidence, use a broader label such as "small mammal", "cat", "dog", "deer", "raccoon-like animal", or "unknown animal".
 - Base identification only on directly visible traits in the clip, such as size, silhouette, movement, tail shape, ear shape, wings, beak, markings, or antlers. Do not infer species from location, typical neighborhood wildlife, or prior probability.
+- For night or infrared footage, lower your species confidence substantially. Do not rely on color, fine texture, or markings that are not clearly visible in grayscale IR footage.
+- In night or infrared clips, rely more on body proportions, gait, posture, tail thickness and length, snout shape, and ear shape. If those cues are not clear, use a broader label instead of a precise species.
 - Count only distinct animals that are actually visible. If repeated appearances may be the same animal, prefer the lower count unless multiple animals are clearly present at once.
 - In the activity field, if an animal is clearly visible, prefer the most specific visually supported label. Do not add "likely" by default, and do not use it when one species is the clear best match.
 - Sometimes there will not be any animals in the video, especially when people are present. Be sure that animals are actually in the video before claiming that they are.
