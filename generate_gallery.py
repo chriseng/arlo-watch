@@ -521,6 +521,7 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
     function buildRowsHtml(filtered) {{
       return filtered.map((entry) => {{
         const events = buildDisplayEvents(entry);
+        const verificationNote = buildVerificationNote(entry);
         const duration = entry.duration_seconds != null ? ` (${{entry.duration_seconds}}s)` : '';
         return `
           <article class="row">
@@ -535,6 +536,7 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
             <section class="cell">
               <h3>Activity</h3>
               <p class="activity">${{escapeHtml(entry.json.activity || '')}}</p>
+              ${{verificationNote ? `<p class="activity">${{escapeHtml(verificationNote)}}</p>` : ''}}
             </section>
             <section class="cell">
               <h3>Notable Events</h3>
@@ -546,25 +548,26 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
     }}
 
     function buildDisplayEvents(entry) {{
-      const events = Array.isArray(entry.json.notable_events) ? [...entry.json.notable_events] : [];
+      return Array.isArray(entry.json.notable_events) ? [...entry.json.notable_events] : [];
+    }}
+
+    function buildVerificationNote(entry) {{
       const verification = entry.json.verification;
-      if (!verification) return events;
+      if (!verification) return '';
 
       const frameAssessment = typeof verification.frame_assessment === 'string' ? verification.frame_assessment.trim() : '';
       if (verification.presence_conflict) {{
-        events.push(frameAssessment ? `Verification warning: ${{frameAssessment}}` : 'Verification warning: No clearly visible subject was confirmed in the sampled frames.');
-        return events;
+        return frameAssessment ? `Verification Warning: ${{frameAssessment}}` : 'Verification Warning: No clearly visible subject was confirmed in the sampled frames.';
       }}
 
       const visibleSubjects = Array.isArray(verification.visible_subjects) ? verification.visible_subjects : [];
       const activity = String(entry.json.activity || '').toLowerCase();
-      if (!frameAssessment || visibleSubjects.length !== 1) return events;
+      if (!frameAssessment || visibleSubjects.length !== 1) return '';
 
       const verifiedLabel = String(visibleSubjects[0] || '').trim().toLowerCase();
-      if (!verifiedLabel || activity.includes(verifiedLabel)) return events;
+      if (!verifiedLabel || activity.includes(verifiedLabel)) return '';
 
-      events.push(`Alternate analysis: ${{frameAssessment}}`);
-      return events;
+      return `Alternate Analysis: ${{frameAssessment}}`;
     }}
 
     function hydrateVideo(button) {{
