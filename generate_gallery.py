@@ -522,6 +522,14 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
       return filtered.map((entry) => {{
         const events = buildDisplayEvents(entry);
         const verificationNote = buildVerificationNote(entry);
+        const verificationSection = verificationNote
+          ? `
+            <section class="cell">
+              <h3>${{escapeHtml(verificationNote.title)}}</h3>
+              <p class="activity">${{escapeHtml(verificationNote.body)}}</p>
+            </section>
+          `
+          : '';
         const duration = entry.duration_seconds != null ? ` (${{entry.duration_seconds}}s)` : '';
         return `
           <article class="row">
@@ -536,8 +544,8 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
             <section class="cell">
               <h3>Activity</h3>
               <p class="activity">${{escapeHtml(entry.json.activity || '')}}</p>
-              ${{verificationNote ? `<p class="activity">${{escapeHtml(verificationNote)}}</p>` : ''}}
             </section>
+            ${{verificationSection}}
             <section class="cell">
               <h3>Notable Events</h3>
               ${{events.length ? `<ul class="events">${{events.map((item) => `<li>${{escapeHtml(item)}}</li>`).join('')}}</ul>` : '<p class="activity">None recorded.</p>'}}
@@ -553,21 +561,27 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
 
     function buildVerificationNote(entry) {{
       const verification = entry.json.verification;
-      if (!verification) return '';
+      if (!verification) return null;
 
       const frameAssessment = typeof verification.frame_assessment === 'string' ? verification.frame_assessment.trim() : '';
       if (verification.presence_conflict) {{
-        return frameAssessment ? `Verification Warning: ${{frameAssessment}}` : 'Verification Warning: No clearly visible subject was confirmed in the sampled frames.';
+        return {{
+          title: 'Verification Warning',
+          body: frameAssessment || 'No clearly visible subject was confirmed in the sampled frames.',
+        }};
       }}
 
       const visibleSubjects = Array.isArray(verification.visible_subjects) ? verification.visible_subjects : [];
       const activity = String(entry.json.activity || '').toLowerCase();
-      if (!frameAssessment || visibleSubjects.length !== 1) return '';
+      if (!frameAssessment || visibleSubjects.length !== 1) return null;
 
       const verifiedLabel = String(visibleSubjects[0] || '').trim().toLowerCase();
-      if (!verifiedLabel || activity.includes(verifiedLabel)) return '';
+      if (!verifiedLabel || activity.includes(verifiedLabel)) return null;
 
-      return `Alternate Analysis: ${{frameAssessment}}`;
+      return {{
+        title: 'Alternate Analysis',
+        body: frameAssessment,
+      }};
     }}
 
     function hydrateVideo(button) {{
