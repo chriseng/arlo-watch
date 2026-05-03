@@ -38,6 +38,8 @@ Example JSON output:
   "verification": {
     "presence_conflict": false,
     "frame_assessment": "The contact sheet shows a clearly visible bird in multiple frames.",
+    "activity_sample_frames": ["A2", "B2"],
+    "activity_sample_frame_timestamps_seconds": {"A2": 12.0, "B2": 12.4},
     "animal_frames": ["A2", "B2"],
     "visible_subjects": ["house finch"],
     "confidence": "medium"
@@ -63,7 +65,7 @@ Animal summaries use a two-stage flow:
 
 1. Gemini analyzes the uploaded video clip and produces the normal JSON summary, including the representative screenshot timestamp and 1-3 evidence timestamps.
 2. If and only if the first pass reports `animals > 0`, `analyze.py` builds a labeled 3x3 contact sheet from sampled frames across the clip and sends that sheet to Gemini for verification.
-3. The verification pass must point to specific grid cells such as `A2` or `B3` in `verification.animal_frames` where an animal is actually visible.
+3. The verification pass must point to specific grid cells such as `A2` or `B3` in `verification.activity_sample_frames` where a clearly visible subject appears. The saved JSON also records those frame timestamps in `verification.activity_sample_frame_timestamps_seconds`.
 4. If verification cannot confirm an animal in the still frames, the original summary is preserved and `verification.presence_conflict` is set to `true`.
 5. If verification does confirm an animal, the original `activity`, `notable_events`, and `screenshot_reason` are still preserved. The verification result is stored separately in the `verification` object as a second opinion rather than rewriting the saved analysis text.
 
@@ -78,6 +80,7 @@ This is deliberately asymmetric:
 
 - If `verification.presence_conflict` is `true`, the gallery appends a `Hallucination warning: ...` line to the rendered notable-events list using `verification.frame_assessment`.
 - If verification reports one clear `visible_subjects` label and that label does not appear in the main `activity` text, the gallery appends an `Alternate analysis: ...` line to the rendered notable-events list using `verification.frame_assessment`.
+- New clip JSON stores verified grid labels in `verification.activity_sample_frames` and their timestamps in `verification.activity_sample_frame_timestamps_seconds`. `verification.animal_frames` is still written as a compatibility alias.
 - Older JSON files that have no `verification` object still render normally.
 
 ### Gemini call implications

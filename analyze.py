@@ -88,7 +88,7 @@ Return ONLY a valid JSON object with these fields:
 - persons (integer: number of distinct people clearly visible across the provided frames)
 - vehicles (integer: number of distinct vehicles clearly visible across the provided frames)
 - animals (integer: number of distinct animals clearly visible across the provided frames)
-- animal_frames (array of strings: grid labels such as "A1" or "B3" where an animal is clearly visible; leave empty if none)
+- activity_sample_frames (array of strings: grid labels such as "A1" or "B3" where a clearly visible subject appears; leave empty if none)
 - visible_subjects (array of short strings describing only subjects clearly visible in at least one frame)
 - frame_assessment (string: one sentence stating whether the frames show a clearly visible subject or only ambiguous/background motion)
 - confidence (string: one of "high", "medium", "low")
@@ -313,12 +313,56 @@ def clip_duration_seconds(clip: Path) -> float | None:
 
 def build_verification_timestamps(clip: Path, result: dict) -> list[float]:
     screenshot_seconds = float(result.get("screenshot_timestamp_seconds", 0))
-    timestamps = normalized_evidence_timestamps(result, screenshot_seconds)
     duration_seconds = clip_duration_seconds(clip)
-    if duration_seconds and duration_seconds > 0:
-        sample_points = [0.1, 0.25, 0.4, 0.6, 0.75, 0.9]
+    evidence_timestamps = normalized_evidence_timestamps(result, screenshot_seconds)
+
+    timestamps: list[float] = []
+    fallback_timestamps: list[float] = []
+    evidence_count = len(evidence_timestamps)
+
+    if evidence_count >= 3:
+        for ts in evidence_timestamps[:3]:
+            timestamps.extend([ts - 0.4, ts, ts + 0.4])
+            fallback_timestamps.extend([ts + 0.8, ts + 1.2, ts + 1.6])
+    elif evidence_count == 2:
+        for ts in evidence_timestamps:
+            timestamps.extend([ts - 0.6, ts - 0.2, ts + 0.2, ts + 0.6])
+            fallback_timestamps.extend([ts + 1.0, ts + 1.4, ts + 1.8])
+        if duration_seconds and duration_seconds > 0:
+            timestamps.extend([duration_seconds * 0.2, duration_seconds * 0.8])
+    elif evidence_count == 1:
+        ts = evidence_timestamps[0]
+        timestamps.extend([
+            ts - 1.0,
+            ts - 0.6,
+            ts - 0.3,
+            ts - 0.1,
+            ts,
+            ts + 0.1,
+            ts + 0.3,
+            ts + 0.6,
+            ts + 1.0,
+        ])
+        fallback_timestamps.extend([ts + 1.4, ts + 1.8, ts + 2.2, ts + 2.8, ts + 3.4])
+    elif duration_seconds and duration_seconds > 0:
+        sample_points = [0.05, 0.15, 0.25, 0.4, 0.55, 0.7, 0.82, 0.92, 0.98]
         for ratio in sample_points:
             timestamps.append(duration_seconds * ratio)
+    else:
+        timestamps = [screenshot_seconds]
+
+    if evidence_count > 0:
+        timestamps.extend(fallback_timestamps)
+        if duration_seconds and duration_seconds > 0:
+            timestamps.extend([
+                duration_seconds * 0.15,
+                duration_seconds * 0.35,
+                duration_seconds * 0.55,
+                duration_seconds * 0.75,
+                duration_seconds * 0.9,
+            ])
+        else:
+            timestamps.extend([screenshot_seconds + 1.5, screenshot_seconds + 3.0, screenshot_seconds + 4.5])
 
     deduped = []
     seen = set()
@@ -373,6 +417,10 @@ def build_verification_sheet(clip: Path, timestamps: list[float], dest: Path) ->
         "B1", "B2", "B3",
         "C1", "C2", "C3",
     ]
+    tile_width = 640
+    tile_height = 360
+    label_width = 260
+    label_height = 52
     frames = []
     try:
         for index, seconds in enumerate(timestamps):
@@ -380,15 +428,15 @@ def build_verification_sheet(clip: Path, timestamps: list[float], dest: Path) ->
             ok, frame = capture.read()
             if not ok:
                 continue
-            tile = cv2.resize(frame, (480, 270))
+            tile = cv2.resize(frame, (tile_width, tile_height))
             label = labels[index] if index < len(labels) else f"F{index + 1}"
-            cv2.rectangle(tile, (0, 0), (220, 42), (0, 0, 0), -1)
+            cv2.rectangle(tile, (0, 0), (label_width, label_height), (0, 0, 0), -1)
             cv2.putText(
                 tile,
                 f"{label}  {seconds:.1f}s",
-                (12, 28),
+                (14, 34),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
+                1.0,
                 (255, 255, 255),
                 2,
                 cv2.LINE_AA,
@@ -409,6 +457,22 @@ def build_verification_sheet(clip: Path, timestamps: list[float], dest: Path) ->
     sheet = cv2.vconcat(rows)
     if not cv2.imwrite(str(dest), sheet):
         raise RuntimeError(f"Could not write verification sheet: {dest}")
+
+
+def verification_frame_labels() -> list[str]:
+    return [
+        "A1", "A2", "A3",
+        "B1", "B2", "B3",
+        "C1", "C2", "C3",
+    ]
+
+
+def verification_label_timestamps(timestamps: list[float]) -> dict[str, float]:
+    labels = verification_frame_labels()
+    return {
+        labels[index]: round(float(timestamp), 1)
+        for index, timestamp in enumerate(timestamps[:len(labels)])
+    }
 
 
 def upload_files_and_wait(client: genai.Client, paths: list[Path]) -> list:
@@ -433,6 +497,7 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
         return result
 
     timestamps = build_verification_timestamps(clip, result)
+    label_timestamps = verification_label_timestamps(timestamps)
     sheet_path = verification_sheet_path(clip)
     build_verification_sheet(clip, timestamps, sheet_path)
 
@@ -456,15 +521,27 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
     verified_subjects = sum(
         int(verification.get(key, 0) or 0) for key in ("persons", "vehicles", "animals")
     )
-    animal_frames = verification.get("animal_frames", [])
+    activity_sample_frames = verification.get("activity_sample_frames")
+    if not isinstance(activity_sample_frames, list):
+        activity_sample_frames = verification.get("animal_frames", [])
+    if not isinstance(activity_sample_frames, list):
+        activity_sample_frames = []
+
+    sample_frame_timestamps = {
+        label: label_timestamps[label]
+        for label in activity_sample_frames
+        if isinstance(label, str) and label in label_timestamps
+    }
     verified_animals = int(verification.get("animals", 0) or 0)
-    verified_animals_reliable = verified_animals > 0 and isinstance(animal_frames, list) and len(animal_frames) >= 1
+    verified_animals_reliable = verified_animals > 0 and len(activity_sample_frames) >= 1
 
     if claimed_subjects > 0 and (verified_subjects == 0 or not verified_animals_reliable):
         result["verification"] = {
             "presence_conflict": True,
             "frame_assessment": verification.get("frame_assessment"),
-            "animal_frames": animal_frames,
+            "activity_sample_frames": activity_sample_frames,
+            "activity_sample_frame_timestamps_seconds": sample_frame_timestamps,
+            "animal_frames": activity_sample_frames,
             "visible_subjects": verification.get("visible_subjects", []),
             "confidence": verification.get("confidence"),
         }
@@ -472,7 +549,9 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
         result["verification"] = {
             "presence_conflict": False,
             "frame_assessment": verification.get("frame_assessment"),
-            "animal_frames": animal_frames,
+            "activity_sample_frames": activity_sample_frames,
+            "activity_sample_frame_timestamps_seconds": sample_frame_timestamps,
+            "animal_frames": activity_sample_frames,
             "visible_subjects": verification.get("visible_subjects", []),
             "confidence": verification.get("confidence"),
         }
