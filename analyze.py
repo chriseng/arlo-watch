@@ -472,26 +472,67 @@ def substitute_verified_animal_label(text: str, verified_label: str) -> str:
     return text
 
 
-def reconcile_verified_animal_label(result: dict, verification: dict) -> None:
+def uses_broad_or_uncertain_animal_label(text: str) -> bool:
+    lowered = text.lower()
+    uncertainty_markers = [
+        "likely",
+        "possibly",
+        "probably",
+        "maybe",
+        "-like",
+        "unknown",
+    ]
+    broad_labels = [
+        " animal",
+        " mammal",
+        " bird",
+    ]
+    return any(marker in lowered for marker in uncertainty_markers) or any(
+        label in lowered for label in broad_labels
+    )
+
+
+def reconcile_verified_animal_label(result: dict, verification: dict) -> dict:
+    rewrite_info = {
+        "applied": False,
+        "verified_label": None,
+        "activity_rewritten": False,
+        "screenshot_reason_rewritten": False,
+    }
+
     if str(verification.get("confidence", "")).lower() != "high":
-        return
+        return rewrite_info
 
     visible_subjects = verification.get("visible_subjects")
     if not isinstance(visible_subjects, list) or len(visible_subjects) != 1:
-        return
+        return rewrite_info
 
     verified_label = str(visible_subjects[0]).strip()
     if not verified_label:
-        return
+        return rewrite_info
 
-    result["activity"] = substitute_verified_animal_label(
-        str(result.get("activity", "")),
-        verified_label,
-    )
-    result["screenshot_reason"] = substitute_verified_animal_label(
-        str(result.get("screenshot_reason", "")),
-        verified_label,
-    )
+    rewrite_info["verified_label"] = verified_label
+
+    activity = str(result.get("activity", ""))
+    screenshot_reason = str(result.get("screenshot_reason", ""))
+
+    if not uses_broad_or_uncertain_animal_label(activity):
+        rewritten_activity = substitute_verified_animal_label(activity, verified_label)
+        if rewritten_activity != activity:
+            result["activity"] = rewritten_activity
+            rewrite_info["applied"] = True
+            rewrite_info["activity_rewritten"] = True
+    if not uses_broad_or_uncertain_animal_label(screenshot_reason):
+        rewritten_reason = substitute_verified_animal_label(
+            screenshot_reason,
+            verified_label,
+        )
+        if rewritten_reason != screenshot_reason:
+            result["screenshot_reason"] = rewritten_reason
+            rewrite_info["applied"] = True
+            rewrite_info["screenshot_reason_rewritten"] = True
+
+    return rewrite_info
 
 
 def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
@@ -546,15 +587,22 @@ def verify_clip_result(client: genai.Client, clip: Path, result: dict) -> dict:
             "animal_frames": animal_frames,
             "visible_subjects": verification.get("visible_subjects", []),
             "confidence": verification.get("confidence"),
+            "label_rewrite": {
+                "applied": False,
+                "verified_label": None,
+                "activity_rewritten": False,
+                "screenshot_reason_rewritten": False,
+            },
         }
     else:
-        reconcile_verified_animal_label(result, verification)
+        rewrite_info = reconcile_verified_animal_label(result, verification)
         result["verification"] = {
             "overrode_subject_claims": False,
             "frame_assessment": verification.get("frame_assessment"),
             "animal_frames": animal_frames,
             "visible_subjects": verification.get("visible_subjects", []),
             "confidence": verification.get("confidence"),
+            "label_rewrite": rewrite_info,
         }
 
     return result
