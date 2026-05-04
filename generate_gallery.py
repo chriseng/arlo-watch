@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -13,6 +14,13 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[logging.StreamHandler()],
+)
+log = logging.getLogger(__name__)
 
 CLIPS_DIR = Path(os.getenv("CLIPS_DIR", "html/clips"))
 HTML_DIR = Path("html")
@@ -678,11 +686,14 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
 
 
 def main() -> None:
+    log.info("Starting gallery generation...")
     HTML_DIR.mkdir(exist_ok=True)
     entries = load_entries()
+    log.info("Loaded %d analyzed clip(s) from %s.", len(entries), CLIPS_DIR)
     day_summaries = build_day_summaries(entries) if entries else {}
+    log.info("Prepared %d day summary record(s).", len(day_summaries))
     OUTPUT_PATH.write_text(build_html(entries, day_summaries))
-    print(OUTPUT_PATH)
+    log.info("Gallery written to %s", OUTPUT_PATH)
 
 
 if __name__ == "__main__":
