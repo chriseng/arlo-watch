@@ -185,7 +185,26 @@ def build_day_summaries(entries: list[dict]) -> dict:
 
         with genai.Client(api_key=os.environ["GEMINI_API_KEY"]) as client:
             for day, records, digest in pending_days:
-                summary = summarize_day(client, types, day, records)
+                try:
+                    summary = summarize_day(client, types, day, records)
+                except Exception as e:
+                    cached = updated_cache.get(day)
+                    if cached and cached.get("summary"):
+                        log.warning(
+                            "Could not refresh summary for %s; reusing cached summary: %s",
+                            day,
+                            e,
+                        )
+                        summaries[day] = cached["summary"]
+                        continue
+
+                    log.warning(
+                        "Could not generate summary for %s; building gallery without a day summary: %s",
+                        day,
+                        e,
+                    )
+                    continue
+
                 updated_cache[day] = {"digest": digest, "summary": summary}
                 summaries[day] = summary
 
@@ -196,7 +215,11 @@ def build_day_summaries(entries: list[dict]) -> dict:
             if cached and cached.get("summary"):
                 summaries[day] = cached["summary"]
                 continue
-            raise RuntimeError(f"Missing day summary for {day} with digest {digest}")
+            log.warning(
+                "No summary available for %s with digest %s; leaving summary section empty.",
+                day,
+                digest,
+            )
 
     if updated_cache != cache:
         save_summary_cache(updated_cache)
