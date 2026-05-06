@@ -3,7 +3,7 @@
 import argparse
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -12,20 +12,27 @@ load_dotenv()
 
 CLIPS_DIR = Path(os.getenv("CLIPS_DIR", "html/clips"))
 CLIP_RETENTION_DAYS = int(os.getenv("CLIP_RETENTION_DAYS", "7"))
+_FILENAME_TZS = {
+    "UTC": timezone.utc,
+    "EDT": timezone(timedelta(hours=-4)),
+    "EST": timezone(timedelta(hours=-5)),
+}
 
 # Matches filenames like 20260429_181132_EDT.mp4
-_FILENAME_RE = re.compile(r"^(\d{8}_\d{6})_")
+_FILENAME_RE = re.compile(r"^(\d{8}_\d{6})_(EDT|EST|UTC)\.mp4$")
 
 
 def capture_time(mp4: Path) -> datetime | None:
-    """Parse capture datetime from filename (YYYYMMDD_HHMMSS_TZ). Returns UTC-naive datetime or None."""
+    """Parse capture datetime from filename (YYYYMMDD_HHMMSS_TZ). Returns UTC-aware datetime or None."""
     m = _FILENAME_RE.match(mp4.name)
     if not m:
         return None
     try:
-        return datetime.strptime(m.group(1), "%Y%m%d_%H%M%S").replace(tzinfo=timezone.utc)
+        captured = datetime.strptime(m.group(1), "%Y%m%d_%H%M%S")
     except ValueError:
         return None
+    local_tz = _FILENAME_TZS[m.group(2)]
+    return captured.replace(tzinfo=local_tz).astimezone(timezone.utc)
 
 
 def main() -> None:
