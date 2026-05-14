@@ -177,6 +177,8 @@ EXCLUDED_OBJ_CATEGORIES=["Vehicle","Animal","Motion"]
 
 When prompted, enter the 2FA code sent to your email. pyaarlo saves the session token to `.arlo_session/` so subsequent runs won't need it. Session tokens typically last several weeks.
 
+If a later run fails immediately during login because the cached session has gone stale, the downloader now clears `.arlo_session/` and retries once automatically before surfacing the error.
+
 If the session expires and you're running unattended via cron, see **Unattended 2FA** below.
 
 ### 5. Test the full pipeline

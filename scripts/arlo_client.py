@@ -1,12 +1,13 @@
 """Shared Arlo client configuration."""
 
 import os
+import shutil
 from pathlib import Path
 
 import pyaarlo
 
 
-def connect_arlo(*, library_days: int, storage_dir: str | Path) -> pyaarlo.PyArlo:
+def _build_kwargs(*, library_days: int, storage_dir: Path) -> dict:
     kwargs = {
         "username": os.environ["ARLO_USERNAME"],
         "password": os.environ["ARLO_PASSWORD"],
@@ -41,4 +42,41 @@ def connect_arlo(*, library_days: int, storage_dir: str | Path) -> pyaarlo.PyArl
         if value:
             kwargs[kwarg_name] = int(value) if env_name in int_env_names else value
 
-    return pyaarlo.PyArlo(**kwargs)
+    return kwargs
+
+
+def _clear_session_dir(storage_dir: Path) -> None:
+    for path in storage_dir.iterdir():
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+
+
+def _should_retry_with_fresh_session(arlo: pyaarlo.PyArlo, storage_dir: Path) -> bool:
+    if arlo.is_connected:
+        return False
+
+    error = (arlo.last_error or "").lower()
+    if not any(
+        marker in error
+        for marker in ("login failed", "token validation failed", "session start failed")
+    ):
+        return False
+
+    return any(storage_dir.iterdir())
+
+
+def connect_arlo(*, library_days: int, storage_dir: str | Path) -> pyaarlo.PyArlo:
+    storage_dir = Path(storage_dir)
+    kwargs = _build_kwargs(library_days=library_days, storage_dir=storage_dir)
+    arlo = pyaarlo.PyArlo(**kwargs)
+
+    if _should_retry_with_fresh_session(arlo, storage_dir):
+        _clear_session_dir(storage_dir)
+        arlo = pyaarlo.PyArlo(**kwargs)
+
+    if not arlo.is_connected:
+        raise RuntimeError(arlo.last_error or "Unable to connect to Arlo")
+
+    return arlo
