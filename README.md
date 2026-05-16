@@ -262,6 +262,10 @@ Other optional overrides:
 | `MIN_CLIP_DURATION_SECONDS` | `5` | Skip clips shorter than this threshold using metadata first, then MP4 duration verification after download |
 | `EXCLUDED_OBJ_CATEGORIES` | unset | JSON array or comma-separated list of `objCategory` values to skip during download |
 | `GEMINI_MODEL` | `gemini-3.1-flash-lite-preview` | Gemini model to use for analysis |
+| `PREPROCESS_VIDEO_WITH_FFMPEG` | `false` | When `true`, `download.py` uses `ffmpeg` to rewrite newly downloaded clips in place before analysis so downstream steps treat the corrected file as the original |
+| `FFMPEG_VIDEO_PREPROCESS_ARGS_DAY` | unset | ffmpeg arguments appended after `-i input.mp4` for clips classified as day/color; if unset or empty, preprocessing falls back to `-c:v copy -c:a copy` |
+| `FFMPEG_VIDEO_PREPROCESS_ARGS_NIGHT` | unset | ffmpeg arguments appended after `-i input.mp4` for clips classified as night/infrared; if unset or empty, preprocessing falls back to `-c:v copy -c:a copy` |
+| `PREPROCESS_DAY_NIGHT_SATURATION_THRESHOLD` | `12` | Mean HSV saturation threshold used by `download.py` to classify a clip as night/infrared versus day/color; range from 0-255 where 0 should be completely grayscale |
 | `STRIP_AUDIO_BEFORE_UPLOAD` | `false` | When `true`, `analyze.py` uses `ffmpeg` to create a temporary no-audio MP4 for upload to avoid models that reject audio input |
 | `CLIP_RETENTION_DAYS` | `7` | Retention window used by `scripts/cleanup_old_clips.py` |
 
@@ -274,6 +278,17 @@ STRIP_AUDIO_BEFORE_UPLOAD=true
 ```
 
 This is off by default. When enabled, `analyze.py` requires `ffmpeg` on your `PATH` and uploads a temporary video-only copy instead of the original MP4.
+
+If you want newly downloaded clips to be color-corrected before the normal workflow sees them, enable ffmpeg preprocessing in `.env`:
+
+```env
+PREPROCESS_VIDEO_WITH_FFMPEG=true
+FFMPEG_VIDEO_PREPROCESS_ARGS_DAY=-vf "colortemperature=temperature=7200:pl=1,colorbalance=gm=-0.05:pl=1" -c:v libx264 -crf 22 -preset slow -pix_fmt yuv420p -c:a copy -movflags +faststart
+FFMPEG_VIDEO_PREPROCESS_ARGS_NIGHT=
+PREPROCESS_DAY_NIGHT_SATURATION_THRESHOLD=12
+```
+
+This runs in `download.py`, samples a few frames with OpenCV, classifies each clip as day/color or night/infrared using mean saturation, and then replaces the downloaded clip with the corresponding ffmpeg output. Night defaults to passthrough because `FFMPEG_VIDEO_PREPROCESS_ARGS_NIGHT` can be left empty. If the selected day or night arg string is empty, `download.py` does a passthrough remux with `-c:v copy -c:a copy`. `STRIP_AUDIO_BEFORE_UPLOAD` remains a separate upload-only step in `analyze.py`. If ffmpeg preprocessing fails, the downloaded clip is deleted so an uncorrected file does not continue through analysis by mistake.
 
 ---
 

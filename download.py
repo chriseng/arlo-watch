@@ -4,11 +4,16 @@ import argparse
 import json
 import logging
 import os
+import shlex
+import shutil
 import struct
+import subprocess
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import cv2
 from dotenv import load_dotenv
 
 from scripts.arlo_client import connect_arlo
@@ -27,6 +32,25 @@ SESSION_DIR = Path(os.getenv("SESSION_DIR", ".arlo_session"))
 CAMERA_NAME = os.environ["ARLO_CAMERA_NAME"]
 DAYS_BACK = int(os.getenv("DAYS_BACK", "1"))
 MIN_CLIP_DURATION_SECONDS = int(os.getenv("MIN_CLIP_DURATION_SECONDS", "5"))
+PREPROCESS_VIDEO_WITH_FFMPEG = os.getenv(
+    "PREPROCESS_VIDEO_WITH_FFMPEG", "false"
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+FFMPEG_VIDEO_PREPROCESS_ARGS_DAY = os.getenv(
+    "FFMPEG_VIDEO_PREPROCESS_ARGS_DAY",
+    "",
+).strip()
+FFMPEG_VIDEO_PREPROCESS_ARGS_NIGHT = os.getenv(
+    "FFMPEG_VIDEO_PREPROCESS_ARGS_NIGHT",
+    "",
+).strip()
+PREPROCESS_DAY_NIGHT_SATURATION_THRESHOLD = float(
+    os.getenv("PREPROCESS_DAY_NIGHT_SATURATION_THRESHOLD", "12")
+)
 EASTERN_TZ = ZoneInfo("America/New_York")
 
 
@@ -119,6 +143,85 @@ def download_clip(recording, dest: Path) -> None:
     tmp.rename(dest)
 
 
+def classify_clip_day_or_night(path: Path) -> tuple[str, float]:
+    capture = cv2.VideoCapture(str(path))
+    if not capture.isOpened():
+        raise RuntimeError(f"Could not open {path.name} for day/night classification")
+
+    frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    sample_positions = [0.1, 0.35, 0.6, 0.85]
+    saturation_values = []
+
+    try:
+        for position in sample_positions:
+            if frame_count > 1:
+                frame_index = min(int(frame_count * position), frame_count - 1)
+                capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+            ok, frame = capture.read()
+            if not ok or frame is None or frame.size == 0:
+                continue
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            saturation_values.append(float(hsv[:, :, 1].mean()))
+    finally:
+        capture.release()
+
+    if not saturation_values:
+        raise RuntimeError(
+            f"Could not read sample frames from {path.name} for day/night classification"
+        )
+
+    mean_saturation = sum(saturation_values) / len(saturation_values)
+    clip_mode = (
+        "night"
+        if mean_saturation < PREPROCESS_DAY_NIGHT_SATURATION_THRESHOLD
+        else "day"
+    )
+    return clip_mode, mean_saturation
+
+
+def preprocess_video_with_ffmpeg(path: Path, clip_mode: str) -> None:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        raise RuntimeError(
+            "PREPROCESS_VIDEO_WITH_FFMPEG is enabled, but ffmpeg is not installed or not on PATH"
+        )
+    temp_dir = Path(tempfile.mkdtemp(prefix="arlo-watch-preprocess-"))
+    output_path = temp_dir / path.name
+    configured_args = (
+        FFMPEG_VIDEO_PREPROCESS_ARGS_NIGHT
+        if clip_mode == "night"
+        else FFMPEG_VIDEO_PREPROCESS_ARGS_DAY
+    )
+    preprocess_args = (
+        shlex.split(configured_args)
+        if configured_args
+        else ["-c:v", "copy", "-c:a", "copy"]
+    )
+    command = [
+        ffmpeg_path,
+        "-y",
+        "-i",
+        str(path),
+        *preprocess_args,
+        str(output_path),
+    ]
+    log.info("Pre-processing %s with ffmpeg using %s settings...", path.name, clip_mode)
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+        if not output_path.exists() or output_path.stat().st_size == 0:
+            raise RuntimeError(
+                f"ffmpeg did not produce a usable output file for {path.name}"
+            )
+        output_path.replace(path)
+    except subprocess.CalledProcessError as e:
+        message = (e.stderr or e.stdout or "").strip()
+        raise RuntimeError(
+            f"ffmpeg failed while pre-processing {path.name}: {message or e}"
+        ) from e
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 def get_obj_categories(attrs: dict) -> list[str]:
     value = attrs.get("objCategory")
     if value is None:
@@ -204,6 +307,22 @@ def main() -> None:
         except Exception as e:
             log.error("Failed to download %s: %s", filename, e)
             continue
+
+        if PREPROCESS_VIDEO_WITH_FFMPEG:
+            try:
+                clip_mode, mean_saturation = classify_clip_day_or_night(dest)
+                log.info(
+                    "Classified %s as %s (mean saturation %.1f, threshold %.1f).",
+                    filename,
+                    clip_mode,
+                    mean_saturation,
+                    PREPROCESS_DAY_NIGHT_SATURATION_THRESHOLD,
+                )
+                preprocess_video_with_ffmpeg(dest, clip_mode)
+            except Exception as e:
+                log.error("Failed to pre-process %s: %s", filename, e)
+                dest.unlink(missing_ok=True)
+                continue
 
         # Verify actual duration from the file (metadata is often missing/wrong)
         duration = get_mp4_duration(dest)
