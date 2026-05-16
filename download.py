@@ -185,6 +185,7 @@ def preprocess_video_with_ffmpeg(path: Path, clip_mode: str) -> None:
         raise RuntimeError(
             "PREPROCESS_VIDEO_WITH_FFMPEG is enabled, but ffmpeg is not installed or not on PATH"
         )
+    nice_path = shutil.which("nice")
     temp_dir = Path(tempfile.mkdtemp(prefix="arlo-watch-preprocess-"))
     output_path = temp_dir / path.name
     configured_args = (
@@ -197,7 +198,9 @@ def preprocess_video_with_ffmpeg(path: Path, clip_mode: str) -> None:
         if configured_args
         else ["-c:v", "copy", "-c:a", "copy"]
     )
+    command_prefix = [nice_path] if nice_path else []
     command = [
+        *command_prefix,
         ffmpeg_path,
         "-y",
         "-i",
