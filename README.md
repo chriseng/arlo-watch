@@ -288,7 +288,7 @@ FFMPEG_VIDEO_PREPROCESS_ARGS_NIGHT=
 PREPROCESS_DAY_NIGHT_SATURATION_THRESHOLD=12
 ```
 
-This runs in `download.py`, samples a few frames with OpenCV, classifies each clip as day/color or night/infrared using mean saturation, and then replaces the downloaded clip with the corresponding ffmpeg output. Night defaults to passthrough because `FFMPEG_VIDEO_PREPROCESS_ARGS_NIGHT` can be left empty. If the selected day or night arg string is empty, `download.py` does a passthrough remux with `-c:v copy -c:a copy`. `STRIP_AUDIO_BEFORE_UPLOAD` remains a separate upload-only step in `analyze.py`. If ffmpeg preprocessing fails, the downloaded clip is deleted so an uncorrected file does not continue through analysis by mistake.
+This runs in `download.py` after all Arlo downloads complete, samples a few frames with OpenCV, classifies each clip as day/color or night/infrared using mean saturation, and then replaces the downloaded clip with the corresponding ffmpeg output. Night defaults to passthrough because `FFMPEG_VIDEO_PREPROCESS_ARGS_NIGHT` can be left empty. If the selected day or night arg string is empty, `download.py` does a passthrough remux with `-c:v copy -c:a copy`. `STRIP_AUDIO_BEFORE_UPLOAD` remains a separate upload-only step in `analyze.py`. If ffmpeg preprocessing fails, the downloaded clip is deleted so an uncorrected file does not continue through analysis by mistake.
 
 ---
 

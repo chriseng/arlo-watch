@@ -273,7 +273,7 @@ def main() -> None:
         'Found %d recording(s) for camera "%s"', len(recordings), CAMERA_NAME
     )
 
-    downloaded = 0
+    downloaded_paths: list[Path] = []
     for rec in recordings:
         filename = clip_filename(rec.created_at)
         dest = CLIPS_DIR / filename
@@ -308,22 +308,6 @@ def main() -> None:
             log.error("Failed to download %s: %s", filename, e)
             continue
 
-        if PREPROCESS_VIDEO_WITH_FFMPEG:
-            try:
-                clip_mode, mean_saturation = classify_clip_day_or_night(dest)
-                log.info(
-                    "Classified %s as %s (mean saturation %.1f, threshold %.1f).",
-                    filename,
-                    clip_mode,
-                    mean_saturation,
-                    PREPROCESS_DAY_NIGHT_SATURATION_THRESHOLD,
-                )
-                preprocess_video_with_ffmpeg(dest, clip_mode)
-            except Exception as e:
-                log.error("Failed to pre-process %s: %s", filename, e)
-                dest.unlink(missing_ok=True)
-                continue
-
         # Verify actual duration from the file (metadata is often missing/wrong)
         duration = get_mp4_duration(dest)
         if duration is not None and duration < MIN_CLIP_DURATION_SECONDS:
@@ -331,9 +315,29 @@ def main() -> None:
             dest.unlink()
             continue
 
-        downloaded += 1
+        downloaded_paths.append(dest)
 
-    log.info("Downloaded %d new clip(s).", downloaded)
+    if PREPROCESS_VIDEO_WITH_FFMPEG and downloaded_paths:
+        log.info("Pre-processing %d downloaded clip(s)...", len(downloaded_paths))
+        kept_paths = []
+        for path in downloaded_paths:
+            try:
+                clip_mode, mean_saturation = classify_clip_day_or_night(path)
+                log.info(
+                    "Classified %s as %s (mean saturation %.1f, threshold %.1f).",
+                    path.name,
+                    clip_mode,
+                    mean_saturation,
+                    PREPROCESS_DAY_NIGHT_SATURATION_THRESHOLD,
+                )
+                preprocess_video_with_ffmpeg(path, clip_mode)
+                kept_paths.append(path)
+            except Exception as e:
+                log.error("Failed to pre-process %s: %s", path.name, e)
+                path.unlink(missing_ok=True)
+        downloaded_paths = kept_paths
+
+    log.info("Downloaded %d new clip(s).", len(downloaded_paths))
 
 
 if __name__ == "__main__":
