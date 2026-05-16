@@ -3,6 +3,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+lock_file=".run.sh.lock"
+exec 9>"$lock_file"
+if ! flock -n 9; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S%z') ERROR [run] another instance of run.sh is already running" >&2
+  exit 1
+fi
+
 timestamp() {
   date '+%Y-%m-%d %H:%M:%S%z'
 }
