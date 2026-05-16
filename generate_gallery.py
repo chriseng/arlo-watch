@@ -250,9 +250,7 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
       margin: 0;
       font-family: Georgia, "Times New Roman", serif;
       color: var(--ink);
-      background:
-        radial-gradient(circle at top left, rgba(216,179,106,.22), transparent 28%),
-        linear-gradient(180deg, #f8f3e8 0%, var(--bg) 100%);
+      background: var(--bg);
     }}
     .shell {{
       max-width: 1440px;
