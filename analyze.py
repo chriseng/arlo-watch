@@ -136,9 +136,116 @@ def strip_audio_for_upload(path: Path) -> Path:
     return stripped_path
 
 
+def transcode_video_for_upload(path: Path) -> Path:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        raise RuntimeError(
+            "ffmpeg is required to transcode videos for Gemini upload fallback, but was not found on PATH"
+        )
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="arlo-watch-upload-"))
+    transcoded_path = temp_dir / f"{path.stem}.upload.mp4"
+    command = [
+        ffmpeg_path,
+        "-y",
+        "-i",
+        str(path),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "96k",
+        str(transcoded_path),
+    ]
+    log.info("Transcoding %s into a Gemini-friendly MP4 for upload fallback...", path.name)
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        message = (e.stderr or e.stdout or "").strip()
+        raise RuntimeError(
+            f"ffmpeg failed while transcoding {path.name} for Gemini upload fallback: {message or e}"
+        ) from e
+    return transcoded_path
+
+
+def probe_video_metadata(path: Path) -> dict | None:
+    ffprobe_path = shutil.which("ffprobe")
+    if not ffprobe_path or not path.exists():
+        return None
+
+    command = [
+        ffprobe_path,
+        "-v",
+        "error",
+        "-show_entries",
+        "format=format_name,duration,size:stream=index,codec_type,codec_name,profile,pix_fmt,width,height,r_frame_rate,avg_frame_rate",
+        "-of",
+        "json",
+        str(path),
+    ]
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        message = (e.stderr or e.stdout or "").strip()
+        log.warning("ffprobe failed for %s: %s", path.name, message or e)
+        return None
+
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        log.warning("ffprobe returned non-JSON output for %s", path.name)
+        return None
+
+
+def log_upload_candidate_details(path: Path, label: str) -> None:
+    try:
+        size_bytes = path.stat().st_size
+    except OSError:
+        size_bytes = None
+
+    metadata = probe_video_metadata(path)
+    if metadata is None:
+        log.info(
+            "Gemini upload candidate for %s (%s): size_bytes=%s",
+            path.name,
+            label,
+            size_bytes if size_bytes is not None else "unknown",
+        )
+        return
+
+    log.info(
+        "Gemini upload candidate for %s (%s): size_bytes=%s ffprobe=%s",
+        path.name,
+        label,
+        size_bytes if size_bytes is not None else "unknown",
+        json.dumps(metadata, sort_keys=True),
+    )
+
+
 def is_retryable_generate_error(error: Exception) -> bool:
     message = str(error)
     return "503 UNAVAILABLE" in message or "429" in message
+
+
+def is_gemini_file_processing_failure(error: Exception) -> bool:
+    message = str(error)
+    return (
+        "Gemini file processing failed" in message
+        or "Timed out waiting for Gemini to process" in message
+    )
 
 
 def gemini_enum_name(value) -> str:
@@ -247,15 +354,42 @@ def upload_and_wait(client: genai.Client, path: Path):
 
 
 def analyze_clip(client: genai.Client, path: Path) -> dict:
-    upload_path = path
-    temp_dir = None
+    upload_candidates = []
+    temp_dirs = []
     video_file = None
     if STRIP_AUDIO_BEFORE_UPLOAD:
-        upload_path = strip_audio_for_upload(path)
-        temp_dir = upload_path.parent
+        stripped_path = strip_audio_for_upload(path)
+        temp_dirs.append(stripped_path.parent)
+        upload_candidates.append(("stripped-audio", stripped_path))
+        upload_candidates.append(("original-with-audio", path))
+    else:
+        upload_candidates.append(("original", path))
 
     try:
-        video_file = upload_and_wait(client, upload_path)
+        upload_error = None
+        for upload_label, upload_path in upload_candidates:
+            try:
+                log_upload_candidate_details(upload_path, upload_label)
+                if upload_label == "original-with-audio":
+                    log.warning("Retrying Gemini upload for %s using the original clip with audio preserved...", path.name)
+                video_file = upload_and_wait(client, upload_path)
+                upload_error = None
+                break
+            except Exception as e:
+                upload_error = e
+                if not is_gemini_file_processing_failure(e):
+                    raise
+
+        if upload_error is not None:
+            transcoded_path = transcode_video_for_upload(path)
+            temp_dirs.append(transcoded_path.parent)
+            log_upload_candidate_details(transcoded_path, "normalized-h264-aac")
+            log.warning(
+                "Retrying Gemini upload for %s with a normalized H.264/AAC MP4 fallback...",
+                path.name,
+            )
+            video_file = upload_and_wait(client, transcoded_path)
+
         for attempt in range(1, GENERATE_RETRIES + 1):
             try:
                 response = client.models.generate_content(
@@ -286,7 +420,7 @@ def analyze_clip(client: genai.Client, path: Path) -> dict:
                 client.files.delete(name=video_file.name)
             except Exception as e:
                 log.warning("Could not delete Gemini file %s: %s", video_file.name, e)
-        if temp_dir is not None:
+        for temp_dir in temp_dirs:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
