@@ -104,6 +104,7 @@ Return only the JSON object. No markdown fences, no explanation, no extra text."
 POLL_INTERVAL_SECONDS = 5
 UPLOAD_TIMEOUT_SECONDS = 300
 GENERATE_RETRIES = 3
+INLINE_VIDEO_MAX_BYTES = 20 * 1024 * 1024
 
 
 def strip_audio_for_upload(path: Path) -> Path:
@@ -353,6 +354,42 @@ def upload_and_wait(client: genai.Client, path: Path):
     return video_file
 
 
+def generate_clip_analysis(client: genai.Client, clip: Path, contents) -> dict:
+    for attempt in range(1, GENERATE_RETRIES + 1):
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0,
+                ),
+            )
+            result = parse_json_response(response, clip.name)
+            return verify_clip_result(client, clip, result)
+        except Exception as e:
+            if attempt == GENERATE_RETRIES or not is_retryable_generate_error(e):
+                raise
+            delay = attempt * 5
+            log.warning(
+                "Retrying Gemini analysis for %s after attempt %d/%d failed: %s",
+                clip.name,
+                attempt,
+                GENERATE_RETRIES,
+                e,
+            )
+            time.sleep(delay)
+
+
+def inline_video_part(path: Path) -> types.Part:
+    return types.Part(
+        inline_data=types.Blob(
+            data=path.read_bytes(),
+            mime_type="video/mp4",
+        )
+    )
+
+
 def analyze_clip(client: genai.Client, path: Path) -> dict:
     upload_candidates = []
     temp_dirs = []
@@ -389,31 +426,21 @@ def analyze_clip(client: genai.Client, path: Path) -> dict:
                 path.name,
             )
             video_file = upload_and_wait(client, transcoded_path)
-
-        for attempt in range(1, GENERATE_RETRIES + 1):
-            try:
-                response = client.models.generate_content(
-                    model=GEMINI_MODEL,
-                    contents=[video_file, PROMPT],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        temperature=0,
-                    ),
-                )
-                result = parse_json_response(response, path.name)
-                return verify_clip_result(client, path, result)
-            except Exception as e:
-                if attempt == GENERATE_RETRIES or not is_retryable_generate_error(e):
-                    raise
-                delay = attempt * 5
-                log.warning(
-                    "Retrying Gemini analysis for %s after attempt %d/%d failed: %s",
-                    path.name,
-                    attempt,
-                    GENERATE_RETRIES,
-                    e,
-                )
-                time.sleep(delay)
+        return generate_clip_analysis(client, path, [video_file, PROMPT])
+    except Exception as e:
+        if not is_gemini_file_processing_failure(e):
+            raise
+        if path.stat().st_size > INLINE_VIDEO_MAX_BYTES:
+            raise
+        log.warning(
+            "Retrying Gemini analysis for %s with inline video data because Files API processing failed...",
+            path.name,
+        )
+        return generate_clip_analysis(
+            client,
+            path,
+            types.Content(parts=[inline_video_part(path), types.Part(text=PROMPT)]),
+        )
     finally:
         if video_file is not None:
             try:
