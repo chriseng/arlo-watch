@@ -141,23 +141,107 @@ def is_retryable_generate_error(error: Exception) -> bool:
     return "503 UNAVAILABLE" in message or "429" in message
 
 
+def gemini_enum_name(value) -> str:
+    if value is None:
+        return "UNKNOWN"
+    return getattr(value, "name", str(value))
+
+
+def serialize_gemini_value(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {key: serialize_gemini_value(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [serialize_gemini_value(item) for item in value]
+
+    for method_name in ("model_dump", "to_dict"):
+        method = getattr(value, method_name, None)
+        if callable(method):
+            try:
+                return serialize_gemini_value(method())
+            except Exception:
+                pass
+
+    if hasattr(value, "__dict__"):
+        return {
+            key: serialize_gemini_value(val)
+            for key, val in vars(value).items()
+            if not key.startswith("_")
+        }
+
+    return str(value)
+
+
+def gemini_file_failure_details(video_file) -> str:
+    error = getattr(video_file, "error", None)
+    if error is None:
+        return ""
+
+    parts = []
+    code = getattr(error, "code", None)
+    message = getattr(error, "message", None)
+    details = getattr(error, "details", None)
+
+    if code is not None:
+        parts.append(f"code={code}")
+    if message:
+        parts.append(f"message={message}")
+    if details:
+        serialized_details = serialize_gemini_value(details)
+        parts.append(f"details={json.dumps(serialized_details, sort_keys=True)}")
+
+    if parts:
+        return ", ".join(parts)
+    return str(error)
+
+
+def gemini_file_state_summary(video_file) -> str:
+    state = gemini_enum_name(getattr(video_file, "state", None))
+    summary_parts = [f"state={state}"]
+
+    mime_type = getattr(video_file, "mime_type", None)
+    size_bytes = getattr(video_file, "size_bytes", None)
+    uri = getattr(video_file, "uri", None)
+
+    if mime_type:
+        summary_parts.append(f"mime_type={mime_type}")
+    if size_bytes is not None:
+        summary_parts.append(f"size_bytes={size_bytes}")
+    if uri:
+        summary_parts.append(f"uri={uri}")
+
+    failure_details = gemini_file_failure_details(video_file)
+    if failure_details:
+        summary_parts.append(f"error=({failure_details})")
+
+    return ", ".join(summary_parts)
+
+
 def upload_and_wait(client: genai.Client, path: Path):
     log.info("Uploading %s to Gemini Files API...", path.name)
     video_file = client.files.upload(file=str(path))
 
     elapsed = 0
-    while video_file.state.name == "PROCESSING":
+    last_logged_state = None
+    while gemini_enum_name(getattr(video_file, "state", None)) == "PROCESSING":
+        current_state = gemini_file_state_summary(video_file)
+        if current_state != last_logged_state:
+            log.info("Gemini file status for %s: %s", path.name, current_state)
+            last_logged_state = current_state
         if elapsed >= UPLOAD_TIMEOUT_SECONDS:
             raise RuntimeError(
-                f"Timed out waiting for Gemini to process {path.name}"
+                f"Timed out waiting for Gemini to process {path.name}: "
+                f"{gemini_file_state_summary(video_file)}"
             )
         time.sleep(POLL_INTERVAL_SECONDS)
         elapsed += POLL_INTERVAL_SECONDS
         video_file = client.files.get(name=video_file.name)
 
-    if video_file.state.name != "ACTIVE":
+    if gemini_enum_name(getattr(video_file, "state", None)) != "ACTIVE":
         raise RuntimeError(
-            f"Gemini file processing failed for {path.name}: state={video_file.state.name}"
+            f"Gemini file processing failed for {path.name}: "
+            f"{gemini_file_state_summary(video_file)}"
         )
     return video_file
 
