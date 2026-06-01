@@ -267,7 +267,8 @@ Other optional overrides:
 | `FFMPEG_VIDEO_PREPROCESS_ARGS_NIGHT` | unset | ffmpeg arguments appended after `-i input.mp4` for clips classified as night/infrared; if unset or empty, preprocessing falls back to `-c:v copy -c:a copy` |
 | `PREPROCESS_DAY_NIGHT_SATURATION_THRESHOLD` | `12` | Mean HSV saturation threshold used by `download.py` to classify a clip as night/infrared versus day/color; range from 0-255 where 0 should be completely grayscale |
 | `STRIP_AUDIO_BEFORE_UPLOAD` | `false` | When `true`, `analyze.py` uses `ffmpeg` to create a temporary no-audio MP4 for upload to avoid models that reject audio input |
-| `CLIP_RETENTION_DAYS` | `7` | Retention window used by `scripts/cleanup_old_clips.py` |
+| `CLIP_RETENTION_DAYS` | `7` | Retention window used by `scripts/cleanup_old_clips.py` for `.mp4` clips |
+| `SCREENSHOT_RETENTION_DAYS` | `30` | Retention window used by `scripts/cleanup_old_clips.py` for timestamped `.json` summaries and `.jpg` screenshots whose matching `.mp4` is already gone |
 
 `download.py` accepts `--latest N` to restrict a run to the most recent `N` videos found within the configured `DAYS_BACK` window.
 
@@ -294,12 +295,13 @@ This runs in `download.py` after all Arlo downloads complete, samples a few fram
 
 ## Storage
 
-`run.sh` automatically runs `scripts/cleanup_old_clips.py` on every cycle before analysis and gallery generation. By default, that script removes `.mp4` clips older than `CLIP_RETENTION_DAYS` (default `7`).
+`run.sh` automatically runs `scripts/cleanup_old_clips.py` on every cycle before analysis and gallery generation. By default, that script removes `.mp4` clips older than `CLIP_RETENTION_DAYS` (default `7`) and also removes standalone timestamped `.json` summaries and `.jpg` screenshots older than `SCREENSHOT_RETENTION_DAYS` (default `30`).
 
-Plan for roughly 50–200 MB per day depending on clip frequency and length. If you want a different retention window, set `CLIP_RETENTION_DAYS` in `.env`:
+Plan for roughly 50–200 MB per day depending on clip frequency and length. If you want different retention windows, set them in `.env`:
 
 ```env
 CLIP_RETENTION_DAYS=30
+SCREENSHOT_RETENTION_DAYS=30
 ```
 
-If you want cleanup to also remove `.json` summaries or `.jpg` screenshots for expired clips, run `scripts/cleanup_old_clips.py` manually with `--purge-summaries` and/or `--purge-screenshots`.
+If you want clip deletion to also remove a still-present clip's matching `.json` summary or `.jpg` screenshot in the same pass, run `scripts/cleanup_old_clips.py` manually with `--purge-summaries` and/or `--purge-screenshots`.
