@@ -53,6 +53,7 @@ PROMPT = """Analyze this security camera clip and return ONLY a valid JSON objec
 Core evidence rules:
 - Report only what is directly visible in the clip. Treat the clip as self-contained and ignore prior expectations, common scene patterns, or likely trigger causes.
 - A subject counts only if some part of it is actually visible in one or more frames. Do not infer a subject from motion alone, shadows, ripples, rustling foliage, off-frame sounds, scene context, or the fact that the camera recorded a clip.
+- Be especially careful with garden scenes: moving shadows from leaves or tree branches, shifting reflections, ripples, and water shimmer can look like animal motion. Do not claim a bird on or near a birdbath unless some body part of the bird is actually visible in the frames.
 - Do not assume an animal, person, or vehicle entered or exited the frame unless that subject is visible.
 - If no clearly identifiable person, vehicle, or animal is visible, set persons=0, vehicles=0, animals=0 and describe the clip conservatively as empty or ambiguous motion.
 - When evidence is weak, prefer "unknown animal", "indistinct person", or "no clearly identifiable subject visible" over a specific claim.
@@ -95,6 +96,7 @@ Rules:
 - Count only subjects that are clearly visible in the provided frames.
 - Cite only grid cells where the subject itself is visible, not where you infer it from surrounding context.
 - Do not infer a subject from scene context, motion blur, shadows, water movement, foliage movement, or likely trigger causes.
+- In birdbath or garden frames, treat moving leaf shadows, branch shadows, reflections, and rippling water as background motion unless the animal itself is visible.
 - If an animal is clearly visible, identify it to the most specific visually supported level in `visible_subjects`. Use species names when the verification frames support them, especially for birds. Use qualified or broader labels such as "likely sparrow", "small rabbit", or "unknown mammal" when the verification frames do not support a confident species-level ID.
 - If no clearly identifiable person, vehicle, or animal is visible in any frame, return persons=0, vehicles=0, animals=0 and state that no clearly visible subject is present.
 - Prefer a false negative over a false positive.

@@ -58,6 +58,7 @@ All activity is logged to `arlo_watch.log` and stdout.
 `analyze.py` is intentionally strict about **whether any subject is present at all** and somewhat looser about **species naming once an animal is clearly visible**.
 
 - Presence detection is conservative. The model is told not to infer animals, people, or vehicles from motion triggers, shadows, ripples, foliage, or scene context alone.
+- The main prompt also explicitly calls out birdbath/garden false positives: moving leaf or tree shadows, reflections, and water shimmer near the birdbath should be treated as background motion unless the bird itself is actually visible.
 - Species identification is more permissive after presence is established. If a bird is clearly visible, the model should try to name the most specific visually supported species and use qualifiers like `likely` only when the ID is genuinely uncertain.
 - The goal is to prefer false negatives on subject presence, while still allowing useful species labels when a real bird or animal is on camera.
 
