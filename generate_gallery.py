@@ -371,7 +371,7 @@ def build_html(entries: list[dict], day_summaries: dict) -> str:
     .media-shell .load-video {{
       position: absolute;
       left: 50%;
-      top: 50%;
+      top: 33%;
       transform: translate(-50%, -50%);
       border: 1px solid rgba(255,255,255,.35);
       background: rgba(27,27,24,.76);
